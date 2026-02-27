@@ -26,7 +26,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    if (MOCK_MODE) {
+    if (MOCK_MODE || !auth) {
       setLoading(false)
       return
     }
@@ -38,7 +38,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   async function signInWithGoogle() {
-    if (MOCK_MODE) {
+    if (MOCK_MODE || !auth) {
       setUser(MOCK_USER)
       return
     }
@@ -47,7 +47,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function signOutUser() {
-    if (MOCK_MODE) {
+    if (MOCK_MODE || !auth) {
       setUser(null)
       return
     }
