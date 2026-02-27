@@ -42,7 +42,7 @@ export async function onRequestGet({ request }: { request: Request }) {
     })
 
     if (!pageRes.ok) {
-      return Response.json({ error: '영상 페이지를 불러올 수 없어요.' }, { status: 502 })
+      return Response.json({ lines: [], languages: [], error: `영상 페이지를 불러올 수 없어요. (${pageRes.status})` }, { status: 502 })
     }
 
     const html = await pageRes.text()
@@ -67,7 +67,7 @@ export async function onRequestGet({ request }: { request: Request }) {
 
     const captionRes = await fetch(`${track.baseUrl}&fmt=json3`)
     if (!captionRes.ok) {
-      return Response.json({ error: '자막 데이터를 불러올 수 없어요.' }, { status: 502 })
+      return Response.json({ lines: [], languages: [], error: '자막 데이터를 불러올 수 없어요.' }, { status: 502 })
     }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -86,6 +86,6 @@ export async function onRequestGet({ request }: { request: Request }) {
       { headers: { 'Access-Control-Allow-Origin': '*' } },
     )
   } catch (e) {
-    return Response.json({ error: String(e) }, { status: 500 })
+    return Response.json({ lines: [], languages: [], error: String(e) }, { status: 500 })
   }
 }

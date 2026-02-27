@@ -51,11 +51,20 @@ export function useTranscript() {
         const res = await fetch(
           `/api/transcript?v=${encodeURIComponent(videoId)}&lang=${encodeURIComponent(lang)}`,
         )
-        result = (await res.json()) as TranscriptResult
+        const json = await res.json()
+        if (!res.ok) {
+          setError(json?.error ?? `서버 오류 (${res.status})`)
+          return null
+        }
+        result = json as TranscriptResult
       }
 
-      if (result.error && result.lines.length === 0) {
+      if (result.error && (!result.lines || result.lines.length === 0)) {
         setError(result.error)
+        return null
+      }
+      if (!result.lines) {
+        setError('자막 데이터 형식이 올바르지 않아요.')
         return null
       }
       return result
