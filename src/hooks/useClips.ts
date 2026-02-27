@@ -41,8 +41,8 @@ export function useClips(userId: string) {
       return
     }
 
-    // — Mock 모드: 로컬 상태 —
-    if (MOCK_MODE) {
+    // — Mock 모드 또는 Firebase 미설정: 로컬 상태 —
+    if (MOCK_MODE || !db) {
       setLoading(false)
       return
     }
@@ -75,7 +75,7 @@ export function useClips(userId: string) {
       return
     }
 
-    if (MOCK_MODE) {
+    if (MOCK_MODE || !db) {
       const newClip: Clip = {
         id: `mock-${mockIdCounter++}`,
         userId,
@@ -105,7 +105,7 @@ export function useClips(userId: string) {
       return
     }
 
-    if (MOCK_MODE) {
+    if (MOCK_MODE || !db) {
       setClips((prev) => prev.filter((c) => c.id !== clipId))
       return
     }
