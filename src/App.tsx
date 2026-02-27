@@ -1,12 +1,29 @@
-function App() {
-  return (
-    <div className="flex min-h-screen flex-col items-center justify-center gap-4">
-      <h1 className="text-4xl font-bold tracking-tight text-slate-800">
-        Lingua<span className="text-indigo-500">Clip</span>
-      </h1>
-      <p className="text-slate-500">YouTube 영상으로 배우는 나만의 영어 사전</p>
-    </div>
-  )
+import { AuthProvider, useAuth } from './contexts/AuthContext'
+import LoginPage from './components/LoginPage'
+import Dashboard from './components/Dashboard'
+
+function AppContent() {
+  const { user, loading } = useAuth()
+
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <div className="h-8 w-8 animate-spin rounded-full border-4 border-indigo-500 border-t-transparent" />
+      </div>
+    )
+  }
+
+  if (!user) {
+    return <LoginPage />
+  }
+
+  return <Dashboard />
 }
 
-export default App
+export default function App() {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
+  )
+}
