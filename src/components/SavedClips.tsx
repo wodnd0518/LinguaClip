@@ -17,6 +17,11 @@ interface Props {
 
 export default function SavedClips({ clips, loading, currentVideoId, onSeek, onDelete }: Props) {
   const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set())
+  const [searchQuery, setSearchQuery] = useState('')
+
+  const filtered = searchQuery.trim()
+    ? clips.filter((c) => c.sentence.toLowerCase().includes(searchQuery.toLowerCase()))
+    : clips
 
   async function handleDelete(clipId: string) {
     setDeletingIds((prev) => new Set(prev).add(clipId))
@@ -65,8 +70,53 @@ export default function SavedClips({ clips, loading, currentVideoId, onSeek, onD
   }
 
   return (
-    <div className="flex flex-col gap-2">
-      {clips.map((clip) => {
+    <div className="flex flex-col gap-3">
+      {/* 검색 입력 */}
+      <div className="relative">
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+        >
+          <circle cx="11" cy="11" r="8" />
+          <line x1="21" y1="21" x2="16.65" y2="16.65" />
+        </svg>
+        <input
+          type="text"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder="클립 검색…"
+          className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-8 pr-4 text-sm outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+        />
+        {searchQuery && (
+          <button
+            onClick={() => setSearchQuery('')}
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        )}
+      </div>
+
+      {/* 검색 결과 없음 */}
+      {filtered.length === 0 && (
+        <div className="py-8 text-center text-sm text-slate-400">
+          "<span className="font-medium text-slate-600">{searchQuery}</span>"에 해당하는 클립이 없어요.
+        </div>
+      )}
+
+      <div className="flex flex-col gap-2">
+      {filtered.map((clip) => {
         const isSameVideo = clip.videoId === currentVideoId
         return (
           <div
@@ -144,6 +194,7 @@ export default function SavedClips({ clips, loading, currentVideoId, onSeek, onD
           </div>
         )
       })}
+      </div>
     </div>
   )
 }

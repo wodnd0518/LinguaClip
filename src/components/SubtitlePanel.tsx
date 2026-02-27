@@ -1,12 +1,12 @@
 import { useRef, useState } from 'react'
 import { useDictionary } from '../hooks/useDictionary'
+import { useTranscript, type TranscriptLanguage } from '../hooks/useTranscript'
 
 interface Token {
   text: string
   isWord: boolean
 }
 
-// 영문 단어(apostrophe 포함)와 나머지로 분리
 function tokenize(line: string): Token[] {
   return line
     .split(/([A-Za-z][A-Za-z']*[A-Za-z]|[A-Za-z])/)
@@ -45,26 +45,52 @@ const PART_OF_SPEECH_COLOR: Record<string, string> = {
 }
 
 interface Props {
+  currentVideoId?: string | null
   onSave?: (sentence: string) => Promise<void>
 }
 
-export default function SubtitlePanel({ onSave }: Props) {
+export default function SubtitlePanel({ currentVideoId, onSave }: Props) {
   const [input, setInput] = useState('')
   const [lines, setLines] = useState<string[]>([])
   const [selectedWord, setSelectedWord] = useState<string | null>(null)
   const [savingIdx, setSavingIdx] = useState<number | null>(null)
   const [savedIdxs, setSavedIdxs] = useState<Set<number>>(new Set())
-  const audioRef = useRef<HTMLAudioElement | null>(null)
-  const { entry, loading, error, lookup, clear } = useDictionary()
 
-  function handleAnalyze() {
-    const parsed = input
-      .split('\n')
-      .map((l) => l.trim())
-      .filter(Boolean)
+  // 자막 자동 불러오기
+  const { loading: transcriptLoading, error: transcriptError, load: loadTranscript } = useTranscript()
+  const [languages, setLanguages] = useState<TranscriptLanguage[]>([])
+  const [selectedLang, setSelectedLang] = useState('en')
+
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const { entry, loading: dictLoading, error: dictError, lookup, clear } = useDictionary()
+
+  function analyze(text: string) {
+    const parsed = text.split('\n').map((l) => l.trim()).filter(Boolean)
     setLines(parsed)
     setSelectedWord(null)
     clear()
+  }
+
+  function handleAnalyze() {
+    analyze(input)
+  }
+
+  async function handleAutoLoad(lang = selectedLang) {
+    if (!currentVideoId) return
+    const result = await loadTranscript(currentVideoId, lang)
+    if (!result) return
+
+    if (result.languages.length > 0) setLanguages(result.languages)
+    if (result.selectedLang) setSelectedLang(result.selectedLang)
+
+    const text = result.lines.map((l) => l.text).join('\n')
+    setInput(text)
+    analyze(text)
+  }
+
+  async function handleLangChange(lang: string) {
+    setSelectedLang(lang)
+    await handleAutoLoad(lang)
   }
 
   async function handleSave(line: string, idx: number) {
@@ -101,15 +127,64 @@ export default function SubtitlePanel({ onSave }: Props) {
 
   return (
     <div className="flex flex-col gap-4">
-      {/* 입력 */}
-      <div className="flex flex-col gap-2">
+      {/* 헤더: 라벨 + 자동 불러오기 */}
+      <div className="flex items-center justify-between gap-2">
         <label className="text-sm font-medium text-slate-700">자막 / 스크립트</label>
+
+        {currentVideoId && (
+          <div className="flex items-center gap-2">
+            {/* 언어 선택 — 자막을 한 번 이상 불러온 경우 표시 */}
+            {languages.length > 1 && (
+              <select
+                value={selectedLang}
+                onChange={(e) => handleLangChange(e.target.value)}
+                className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-600 outline-none focus:border-indigo-400"
+              >
+                {languages.map((l) => (
+                  <option key={l.code} value={l.code}>
+                    {l.name}
+                    {l.isAuto ? ' (자동)' : ''}
+                  </option>
+                ))}
+              </select>
+            )}
+
+            <button
+              onClick={() => handleAutoLoad()}
+              disabled={transcriptLoading}
+              className="flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-600 transition hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {transcriptLoading ? (
+                <>
+                  <div className="h-3 w-3 animate-spin rounded-full border-2 border-indigo-400 border-t-transparent" />
+                  불러오는 중…
+                </>
+              ) : (
+                <>
+                  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="7 10 12 15 17 10" />
+                    <line x1="12" y1="15" x2="12" y2="3" />
+                  </svg>
+                  자막 불러오기
+                </>
+              )}
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* 자막 불러오기 에러 */}
+      {transcriptError && (
+        <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-500">{transcriptError}</p>
+      )}
+
+      {/* 입력 영역 */}
+      <div className="flex flex-col gap-2">
         <textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder={
-            'YouTube 자막이나 스크립트를 여기에 붙여넣으세요.\n\nThe quick brown fox jumps over the lazy dog.'
-          }
+          placeholder="YouTube 자막이나 스크립트를 여기에 붙여넣으세요.&#10;&#10;The quick brown fox jumps over the lazy dog."
           rows={5}
           className="resize-none rounded-lg border border-slate-300 px-4 py-3 font-mono text-sm leading-relaxed outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
         />
@@ -187,17 +262,16 @@ export default function SubtitlePanel({ onSave }: Props) {
       {/* 사전 카드 */}
       {selectedWord && (
         <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-          {loading && (
+          {dictLoading && (
             <div className="flex items-center gap-2 text-sm text-slate-400">
               <div className="h-4 w-4 animate-spin rounded-full border-2 border-indigo-400 border-t-transparent" />
               <span>사전 검색 중…</span>
             </div>
           )}
-
-          {error && !loading && (
+          {dictError && !dictLoading && (
             <div className="flex items-center justify-between">
               <p className="text-sm text-slate-500">
-                <span className="font-semibold text-slate-700">"{selectedWord}"</span> — {error}
+                <span className="font-semibold text-slate-700">"{selectedWord}"</span> — {dictError}
               </p>
               <a
                 href={`https://www.google.com/search?q=define+${encodeURIComponent(selectedWord)}`}
@@ -209,28 +283,18 @@ export default function SubtitlePanel({ onSave }: Props) {
               </a>
             </div>
           )}
-
-          {entry && !loading && (
+          {entry && !dictLoading && (
             <div className="flex flex-col gap-4">
-              {/* 단어 + 발음 + 오디오 */}
               <div className="flex items-center gap-3">
                 <h3 className="text-xl font-bold text-slate-800">{entry.word}</h3>
-                {entry.phonetic && (
-                  <span className="text-sm text-slate-400">{entry.phonetic}</span>
-                )}
+                {entry.phonetic && <span className="text-sm text-slate-400">{entry.phonetic}</span>}
                 {entry.audio && (
                   <button
                     onClick={playAudio}
                     title="발음 듣기"
                     className="flex h-7 w-7 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:border-indigo-300 hover:text-indigo-500"
                   >
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      width="14"
-                      height="14"
-                      viewBox="0 0 24 24"
-                      fill="currentColor"
-                    >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
                       <path d="M8 5v14l11-7z" />
                     </svg>
                   </button>
@@ -244,22 +308,16 @@ export default function SubtitlePanel({ onSave }: Props) {
                   더 보기 →
                 </a>
               </div>
-
-              {/* 의미 */}
               <div className="flex flex-col gap-3">
                 {entry.meanings.map((m, i) => (
                   <div key={i} className="flex flex-col gap-1.5">
-                    <span
-                      className={`text-xs font-semibold uppercase tracking-wider ${PART_OF_SPEECH_COLOR[m.partOfSpeech] ?? posColor}`}
-                    >
+                    <span className={`text-xs font-semibold uppercase tracking-wider ${PART_OF_SPEECH_COLOR[m.partOfSpeech] ?? posColor}`}>
                       {m.partOfSpeech}
                     </span>
                     {m.definitions.map((d, j) => (
-                      <div key={j} className="flex flex-col gap-0.5 pl-3 border-l-2 border-slate-100">
+                      <div key={j} className="flex flex-col gap-0.5 border-l-2 border-slate-100 pl-3">
                         <p className="text-sm text-slate-700">{d.definition}</p>
-                        {d.example && (
-                          <p className="text-xs italic text-slate-400">"{d.example}"</p>
-                        )}
+                        {d.example && <p className="text-xs italic text-slate-400">"{d.example}"</p>}
                       </div>
                     ))}
                   </div>

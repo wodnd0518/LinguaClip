@@ -163,7 +163,10 @@ export default function Dashboard() {
 
           {/* 오른쪽: 자막 + 사전 */}
           <div className="lg:flex-1">
-            <SubtitlePanel onSave={canSave ? handleSave : undefined} />
+            <SubtitlePanel
+              currentVideoId={getCurrentVideoId() || null}
+              onSave={canSave ? handleSave : undefined}
+            />
           </div>
 
         </div>
