@@ -13,7 +13,9 @@ const firebaseConfig = {
   appId: import.meta.env.VITE_FIREBASE_APP_ID,
 }
 
-const app = initializeApp(firebaseConfig)
+// apiKey가 없으면 Firebase를 초기화하지 않음 (MOCK_MODE 또는 env 미설정 환경에서 crash 방지)
+const hasConfig = !!import.meta.env.VITE_FIREBASE_API_KEY
+const app = hasConfig ? initializeApp(firebaseConfig) : null
 
-export const auth = getAuth(app)
-export const db = getFirestore(app)
+export const auth = hasConfig ? getAuth(app!) : null!
+export const db = hasConfig ? getFirestore(app!) : null!
