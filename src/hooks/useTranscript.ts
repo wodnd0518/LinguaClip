@@ -51,12 +51,23 @@ export function useTranscript() {
         const res = await fetch(
           `/api/transcript?v=${encodeURIComponent(videoId)}&lang=${encodeURIComponent(lang)}`,
         )
-        const json = await res.json()
+        const text = await res.text()
+        if (!text.trim()) {
+          setError(`API 응답이 비어있어요 (HTTP ${res.status}) — Cloudflare Functions가 작동하지 않을 수 있어요.`)
+          return null
+        }
+        let json: TranscriptResult
+        try {
+          json = JSON.parse(text) as TranscriptResult
+        } catch {
+          setError(`API 응답 오류 (HTTP ${res.status}): ${text.slice(0, 120)}`)
+          return null
+        }
         if (!res.ok) {
           setError(json?.error ?? `서버 오류 (${res.status})`)
           return null
         }
-        result = json as TranscriptResult
+        result = json
       }
 
       if (result.error && (!result.lines || result.lines.length === 0)) {
