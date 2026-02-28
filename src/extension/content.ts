@@ -6,6 +6,31 @@ interface SubtitleEntry { text: string; time: number }
 const subtitleHistory: SubtitleEntry[] = []
 let lastCaptionText = ''
 
+/**
+ * YouTube 자동자막은 이전 청크를 포함해서 표시되는 경우가 많음.
+ * 예) "I took the offer" → "I took the offer and funny"
+ * → suffix-prefix 겹침을 제거해 하나의 문장으로 병합.
+ */
+function mergeSubtitleChunks(chunks: string[]): string {
+  if (chunks.length === 0) return ''
+  let result = chunks[0]
+  for (let i = 1; i < chunks.length; i++) {
+    const next = chunks[i]
+    if (!next) continue
+    // result 끝 부분이 next 앞 부분과 겹치면 겹친 부분 제거
+    const maxOverlap = Math.min(result.length, next.length, 100)
+    let overlapLen = 0
+    for (let len = maxOverlap; len >= 4; len--) {
+      if (result.slice(-len).toLowerCase() === next.slice(0, len).toLowerCase()) {
+        overlapLen = len
+        break
+      }
+    }
+    result = overlapLen > 0 ? result + next.slice(overlapLen) : result + ' ' + next
+  }
+  return result.replace(/\s+/g, ' ').trim()
+}
+
 function getCurrentSubtitle(): string {
   return Array.from(document.querySelectorAll('.ytp-caption-segment'))
     .map((el) => el.textContent ?? '')
@@ -84,49 +109,35 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   if (message.type === 'YT_CAPTURE_SENTENCE') {
     const video = getVideo()
-    const currentTime = video?.currentTime ?? 0
+    const captureTime = video?.currentTime ?? 0
 
-    // 현재 자막을 이력에 추가 (observer가 아직 못 잡았을 경우 대비)
+    // 현재 자막 즉시 수집
     const currentText = getCurrentSubtitle()
     if (currentText && currentText !== lastCaptionText) {
       lastCaptionText = currentText
-      subtitleHistory.push({ text: currentText, time: currentTime })
+      subtitleHistory.push({ text: currentText, time: captureTime })
     }
 
-    // 영상 일시정지
-    if (video && !video.paused) video.pause()
+    // 일시정지 상태면 잠깐 재생해 뒤 자막도 수집
+    if (video?.paused) video.play()
 
-    if (subtitleHistory.length === 0) {
-      sendResponse({ text: '', startTime: currentTime })
-      return true
-    }
+    // 1.5초 더 재생한 뒤 정지 → 앞 3초 + 뒤 1.5초 구간 병합
+    setTimeout(() => {
+      const v = getVideo()
+      if (v && !v.paused) v.pause()
 
-    // 현재 시점 기준 앞 4초 이내 항목만 사용 (과거 누적 방지)
-    const recent = subtitleHistory.filter((e) => e.time >= currentTime - 4)
-    const pool = recent.length > 0 ? recent : subtitleHistory.slice(-3)
+      // captureTime 기준 앞 3초 이내 항목만 사용
+      const pool = subtitleHistory.filter((e) => e.time >= captureTime - 3)
+      const merged = mergeSubtitleChunks(pool.map((e) => e.text))
+      const startTime = pool[0]?.time ?? captureTime
 
-    // pool 안에서 마지막 문장 끝(. ! ?) 이후부터 조합
-    let sentenceStartIdx = 0
-    for (let i = pool.length - 2; i >= 0; i--) {
-      if (/[.!?]\s*$/.test(pool[i].text)) {
-        sentenceStartIdx = i + 1
-        break
-      }
-    }
+      // 이력 초기화
+      subtitleHistory.length = 0
+      lastCaptionText = ''
 
-    const entries = pool.slice(sentenceStartIdx)
-    const fullText = entries
-      .map((e) => e.text)
-      .join(' ')
-      .replace(/\s+/g, ' ')
-      .trim()
-    const startTime = entries[0]?.time ?? currentTime
+      sendResponse({ text: merged || currentText, startTime })
+    }, 1500)
 
-    // 다음 캡처를 위해 이력 초기화
-    subtitleHistory.length = 0
-    lastCaptionText = ''
-
-    sendResponse({ text: fullText || currentText, startTime })
-    return true
+    return true // 비동기 응답
   }
 })
