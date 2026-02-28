@@ -69,6 +69,8 @@ async function fetchCaption(baseUrl: string): Promise<{ lines: ReturnType<typeof
         // YouTube가 XML로 응답한 경우 (자동 생성 자막 등)
         const lines = parseSrv3(trimmed)
         if (lines.length > 0) return { lines, format: 'json3-xml' }
+        // 파싱 실패 시 실제 XML 앞부분 반환 (디버그)
+        return { error: `XML 파싱 실패 (json3): ${trimmed.slice(0, 400)}` }
       }
     }
   }
