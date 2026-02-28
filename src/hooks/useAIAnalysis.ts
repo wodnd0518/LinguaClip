@@ -59,6 +59,39 @@ async function callOpenAI(apiKey: string, prompt: string): Promise<string> {
   return data.choices?.[0]?.message?.content ?? ''
 }
 
+// 모델마다 JSON 형식이 다를 수 있으므로 모든 필드를 string으로 정규화
+function toStr(val: unknown): string {
+  if (typeof val === 'string') return val
+  if (Array.isArray(val)) {
+    return val.map((item) => {
+      if (typeof item === 'string') return item
+      if (typeof item === 'object' && item !== null) {
+        // {phrase, description} / {word, meaning} 등 다양한 키 대응
+        const entries = Object.values(item as Record<string, unknown>).filter(
+          (v) => typeof v === 'string',
+        ) as string[]
+        return entries.length >= 2 ? `${entries[0]}(${entries[1]})` : entries.join(' ')
+      }
+      return String(item)
+    }).join(', ')
+  }
+  if (typeof val === 'object' && val !== null) {
+    return Object.values(val as Record<string, unknown>)
+      .filter((v) => typeof v === 'string')
+      .join(' ')
+  }
+  return String(val ?? '')
+}
+
+function normalizeAnalysis(raw: unknown): AIAnalysis {
+  const r = raw as Record<string, unknown>
+  return {
+    interpretation: toStr(r.interpretation),
+    usage: toStr(r.usage),
+    relatedPhrases: toStr(r.relatedPhrases),
+  }
+}
+
 export function useAIAnalysis(provider: AIProvider, apiKey: string | null) {
   const [analysis, setAnalysis] = useState<AIAnalysis | null>(null)
   const [loading, setLoading] = useState(false)
@@ -80,7 +113,9 @@ export function useAIAnalysis(provider: AIProvider, apiKey: string | null) {
       const text = provider === 'anthropic'
         ? await callAnthropic(apiKey, prompt)
         : await callOpenAI(apiKey, prompt)
-      const parsed = JSON.parse(text) as AIAnalysis
+      // 일부 모델은 마크다운 코드블록으로 감싸거나 필드를 객체/배열로 반환하므로 정규화
+      const cleaned = text.replace(/^```(?:json)?\n?/m, '').replace(/\n?```$/m, '').trim()
+      const parsed = normalizeAnalysis(JSON.parse(cleaned))
       cacheRef.current.set(cacheKey, parsed)
       setAnalysis(parsed)
     } catch {
