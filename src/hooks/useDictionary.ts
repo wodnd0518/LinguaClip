@@ -80,10 +80,10 @@ export function useDictionary() {
             definitions: { definition: string; example?: string }[]
           }[]
         )
-          .slice(0, 3)
+          .slice(0, 4)
           .map((m) => ({
             partOfSpeech: m.partOfSpeech,
-            definitions: m.definitions.slice(0, 2).map((d) => ({
+            definitions: m.definitions.slice(0, 4).map((d) => ({
               definition: d.definition,
               example: d.example,
             })),

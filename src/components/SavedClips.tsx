@@ -1,6 +1,27 @@
 import { useState } from 'react'
 import type { Clip } from '../hooks/useClips'
 
+function escapeRegex(s: string) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function HighlightedSentence({ sentence, word }: { sentence: string; word: string }) {
+  const parts = sentence.split(new RegExp(`(${escapeRegex(word)})`, 'gi'))
+  return (
+    <p className="text-xs leading-relaxed text-slate-500">
+      {parts.map((part, i) =>
+        part.toLowerCase() === word.toLowerCase() ? (
+          <mark key={i} className="rounded bg-indigo-100 px-0.5 font-semibold text-indigo-700 not-italic">
+            {part}
+          </mark>
+        ) : (
+          <span key={i}>{part}</span>
+        ),
+      )}
+    </p>
+  )
+}
+
 function formatTime(seconds: number): string {
   const m = Math.floor(seconds / 60)
   const s = Math.floor(seconds % 60)
@@ -141,11 +162,14 @@ export default function SavedClips({ clips, loading, currentVideoId, onSeek, onD
               {formatTime(clip.timestamp)}
             </button>
 
-            {/* 단어 + 코멘트 */}
-            <div className="flex flex-1 flex-col gap-0.5">
-              <p className="text-sm font-medium leading-relaxed text-slate-800">{clip.sentence}</p>
+            {/* 단어 + 문장 + 코멘트 */}
+            <div className="flex flex-1 flex-col gap-1">
+              <p className="text-sm font-semibold text-slate-800">{clip.sentence}</p>
+              {clip.context && (
+                <HighlightedSentence sentence={clip.context} word={clip.sentence} />
+              )}
               {clip.comment && (
-                <p className="text-xs leading-relaxed text-slate-400">{clip.comment}</p>
+                <p className="text-xs text-slate-400">{clip.comment}</p>
               )}
             </div>
 

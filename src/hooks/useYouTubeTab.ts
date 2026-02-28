@@ -65,5 +65,15 @@ export function useYouTubeTab() {
     })
   }, [])
 
-  return { videoInfo, isOnYouTube, seekTo, navigateTab }
+  const getSubtitle = useCallback((): Promise<string> => {
+    return new Promise((resolve) => {
+      if (!IS_EXT || !tabIdRef.current) return resolve('')
+      chrome.tabs.sendMessage(tabIdRef.current, { type: 'YT_GET_SUBTITLE' }, (response) => {
+        if (chrome.runtime.lastError) return resolve('')
+        resolve((response?.text as string) ?? '')
+      })
+    })
+  }, [])
+
+  return { videoInfo, isOnYouTube, seekTo, navigateTab, getSubtitle }
 }

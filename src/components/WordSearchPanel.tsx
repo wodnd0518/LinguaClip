@@ -14,10 +14,11 @@ const PART_OF_SPEECH_COLOR: Record<string, string> = {
 
 interface Props {
   canSave: boolean
-  onSave?: (word: string, comment: string) => Promise<void>
+  onSave?: (word: string, comment: string, context: string) => Promise<void>
+  onGetSubtitle?: () => Promise<string>
 }
 
-export default function WordSearchPanel({ canSave, onSave }: Props) {
+export default function WordSearchPanel({ canSave, onSave, onGetSubtitle }: Props) {
   const [query, setQuery] = useState('')
   const [comment, setComment] = useState('')
   const [saving, setSaving] = useState(false)
@@ -50,7 +51,8 @@ export default function WordSearchPanel({ canSave, onSave }: Props) {
     if (!onSave || !entry) return
     setSaving(true)
     try {
-      await onSave(entry.word, comment)
+      const context = (await onGetSubtitle?.()) ?? ''
+      await onSave(entry.word, comment, context)
       setSavedWord(entry.word)
       setComment('')
       setTimeout(() => setSavedWord(null), 2000)
@@ -59,7 +61,11 @@ export default function WordSearchPanel({ canSave, onSave }: Props) {
     }
   }
 
-  const posColor = entry ? (PART_OF_SPEECH_COLOR[entry.meanings[0]?.partOfSpeech] ?? 'text-indigo-500') : ''
+  // 모든 예문 추출 (전체 meanings → definitions → example)
+  const allExamples = entry
+    ? entry.meanings
+        .flatMap((m) => m.definitions.map((d) => d.example).filter(Boolean) as string[])
+    : []
 
   return (
     <div className="flex flex-col gap-4">
@@ -134,22 +140,36 @@ export default function WordSearchPanel({ canSave, onSave }: Props) {
             </a>
           </div>
 
-          {/* 뜻 */}
+          {/* 뜻 (예문 제외, 간결하게) */}
           <div className="mt-4 flex flex-col gap-3">
             {entry.meanings.map((m, i) => (
-              <div key={i} className="flex flex-col gap-1.5">
-                <span className={`text-xs font-semibold uppercase tracking-wider ${PART_OF_SPEECH_COLOR[m.partOfSpeech] ?? posColor}`}>
+              <div key={i} className="flex flex-col gap-1">
+                <span className={`text-xs font-semibold uppercase tracking-wider ${PART_OF_SPEECH_COLOR[m.partOfSpeech] ?? 'text-indigo-500'}`}>
                   {m.partOfSpeech}
                 </span>
                 {m.definitions.map((d, j) => (
-                  <div key={j} className="flex flex-col gap-0.5 border-l-2 border-slate-100 pl-3">
-                    <p className="text-sm text-slate-700">{d.definition}</p>
-                    {d.example && <p className="text-xs italic text-slate-400">"{d.example}"</p>}
+                  <div key={j} className="flex gap-1.5 pl-1 text-sm text-slate-700">
+                    <span className="mt-1 shrink-0 text-[8px] text-slate-300">●</span>
+                    <span>{d.definition}</span>
                   </div>
                 ))}
               </div>
             ))}
           </div>
+
+          {/* 예문 섹션 */}
+          {allExamples.length > 0 && (
+            <div className="mt-4 rounded-lg bg-indigo-50 px-4 py-3">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-indigo-400">예문</p>
+              <div className="flex flex-col gap-2">
+                {allExamples.map((ex, i) => (
+                  <p key={i} className="text-sm italic leading-relaxed text-indigo-700">
+                    "{ex}"
+                  </p>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* 코멘트 + 저장 */}
           {canSave && onSave && (
@@ -171,10 +191,10 @@ export default function WordSearchPanel({ canSave, onSave }: Props) {
                   }`}
               >
                 {saving ? (
-                  <div className="flex items-center gap-1.5">
-                    <div className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                  <span className="flex items-center gap-1.5">
+                    <span className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent inline-block" />
                     저장 중…
-                  </div>
+                  </span>
                 ) : savedWord ? (
                   '저장됨 ✓'
                 ) : (
@@ -188,9 +208,7 @@ export default function WordSearchPanel({ canSave, onSave }: Props) {
 
       {/* 영상 미재생 안내 */}
       {!canSave && entry && !loading && (
-        <p className="text-xs text-slate-400">
-          저장하려면 YouTube 영상을 먼저 재생하세요.
-        </p>
+        <p className="text-xs text-slate-400">저장하려면 YouTube 영상을 먼저 재생하세요.</p>
       )}
     </div>
   )

@@ -29,4 +29,15 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     }
     return true
   }
+
+  if (message.type === 'YT_GET_SUBTITLE') {
+    // 현재 화면에 표시 중인 자막 텍스트를 DOM에서 읽기
+    const segments = document.querySelectorAll('.ytp-caption-segment')
+    const text = Array.from(segments)
+      .map((el) => el.textContent ?? '')
+      .join(' ')
+      .trim()
+    sendResponse({ text })
+    return true
+  }
 })

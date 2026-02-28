@@ -28,7 +28,7 @@ export default function Dashboard() {
   const { user, signOutUser } = useAuth()
 
   // 확장 프로그램: YouTube 탭 연동
-  const { videoInfo, isOnYouTube, seekTo: ytSeekTo, navigateTab } = useYouTubeTab()
+  const { videoInfo, isOnYouTube, seekTo: ytSeekTo, navigateTab, getSubtitle } = useYouTubeTab()
 
   // 웹 전용: URL 입력 + IFrame 플레이어
   const [urlInput, setUrlInput] = useState('')
@@ -61,8 +61,8 @@ export default function Dashboard() {
     setVideoId(id)
   }
 
-  async function handleSave(word: string, comment: string): Promise<void> {
-    await saveClip(word, getCurrentVideoId(), getCurrentTime(), comment)
+  async function handleSave(word: string, comment: string, context: string): Promise<void> {
+    await saveClip(word, getCurrentVideoId(), getCurrentTime(), comment, context)
   }
 
   function handleSeek(clip: Clip) {
@@ -166,6 +166,7 @@ export default function Dashboard() {
             <WordSearchPanel
               canSave={canSave}
               onSave={canSave ? handleSave : undefined}
+              onGetSubtitle={IS_EXT ? getSubtitle : undefined}
             />
           </div>
 
