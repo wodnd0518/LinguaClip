@@ -299,7 +299,7 @@ export default function CapturePanel({ canSave, onSave, onCapture, onResume }: P
                   {token.text}
                   {/* 내용어(강세) 표시 — 선택되지 않은 경우에만 점 표시 */}
                   {isContent && !isSelected && (
-                    <span className="absolute -bottom-0.5 left-1/2 h-1 w-1 -translate-x-1/2 rounded-full bg-amber-400" />
+                    <span className="absolute -top-0.5 left-1/2 h-1 w-1 -translate-x-1/2 rounded-full bg-amber-400" />
                   )}
                 </span>
               )
