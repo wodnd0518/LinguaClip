@@ -4,7 +4,7 @@ import { IS_EXT } from '../lib/env'
 import { useYouTubeTab } from '../hooks/useYouTubeTab'
 import YouTubePlayer, { type YouTubePlayerHandle } from './YouTubePlayer'
 import YouTubeStatus from './YouTubeStatus'
-import WordSearchPanel from './WordSearchPanel'
+import CapturePanel from './CapturePanel'
 import SavedClips from './SavedClips'
 import { useClips, type Clip } from '../hooks/useClips'
 
@@ -28,7 +28,7 @@ export default function Dashboard() {
   const { user, signOutUser } = useAuth()
 
   // 확장 프로그램: YouTube 탭 연동
-  const { videoInfo, isOnYouTube, seekTo: ytSeekTo, navigateTab, getSubtitle } = useYouTubeTab()
+  const { videoInfo, isOnYouTube, seekTo: ytSeekTo, navigateTab, captureSubtitle, resumeVideo } = useYouTubeTab()
 
   // 웹 전용: URL 입력 + IFrame 플레이어
   const [urlInput, setUrlInput] = useState('')
@@ -61,8 +61,9 @@ export default function Dashboard() {
     setVideoId(id)
   }
 
-  async function handleSave(word: string, comment: string, context: string): Promise<void> {
-    await saveClip(word, getCurrentVideoId(), getCurrentTime(), comment, context)
+  async function handleSave(word: string, comment: string, context: string, startTime?: number): Promise<void> {
+    const time = startTime !== undefined ? startTime : getCurrentTime()
+    await saveClip(word, getCurrentVideoId(), time, comment, context)
   }
 
   function handleSeek(clip: Clip) {
@@ -161,12 +162,13 @@ export default function Dashboard() {
             )}
           </div>
 
-          {/* 오른쪽: 단어 검색 + 저장 */}
+          {/* 오른쪽: 자막 캡처 + 사전 */}
           <div className="lg:flex-1">
-            <WordSearchPanel
+            <CapturePanel
               canSave={canSave}
               onSave={canSave ? handleSave : undefined}
-              onGetSubtitle={IS_EXT ? getSubtitle : undefined}
+              onCapture={IS_EXT ? captureSubtitle : undefined}
+              onResume={IS_EXT ? resumeVideo : undefined}
             />
           </div>
 

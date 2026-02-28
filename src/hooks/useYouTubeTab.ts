@@ -75,5 +75,22 @@ export function useYouTubeTab() {
     })
   }, [])
 
-  return { videoInfo, isOnYouTube, seekTo, navigateTab, getSubtitle }
+  const captureSubtitle = useCallback((): Promise<{ text: string; startTime: number }> => {
+    return new Promise((resolve) => {
+      if (!IS_EXT || !tabIdRef.current) return resolve({ text: '', startTime: 0 })
+      chrome.tabs.sendMessage(tabIdRef.current, { type: 'YT_CAPTURE_SENTENCE' }, (response) => {
+        if (chrome.runtime.lastError) return resolve({ text: '', startTime: 0 })
+        resolve(response ?? { text: '', startTime: 0 })
+      })
+    })
+  }, [])
+
+  const resumeVideo = useCallback(() => {
+    if (!IS_EXT || !tabIdRef.current) return
+    chrome.tabs.sendMessage(tabIdRef.current, { type: 'YT_PLAY' }, () => {
+      if (chrome.runtime.lastError) { /* 탭이 닫혔거나 content script 없음 */ }
+    })
+  }, [])
+
+  return { videoInfo, isOnYouTube, seekTo, navigateTab, getSubtitle, captureSubtitle, resumeVideo }
 }

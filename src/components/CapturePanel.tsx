@@ -1,0 +1,334 @@
+import { useRef, useState } from 'react'
+import { useDictionary } from '../hooks/useDictionary'
+import { useTranslation } from '../hooks/useTranslation'
+
+const PART_OF_SPEECH_COLOR: Record<string, string> = {
+  noun: 'text-blue-500',
+  verb: 'text-green-500',
+  adjective: 'text-orange-500',
+  adverb: 'text-purple-500',
+  pronoun: 'text-pink-500',
+  preposition: 'text-teal-500',
+  conjunction: 'text-red-500',
+  interjection: 'text-yellow-500',
+}
+
+function tokenize(text: string) {
+  return text
+    .split(/([A-Za-z][A-Za-z']*[A-Za-z]|[A-Za-z])/)
+    .filter(Boolean)
+    .map((t) => ({ text: t, isWord: /[A-Za-z]/.test(t) }))
+}
+
+interface Props {
+  canSave: boolean
+  onSave?: (word: string, comment: string, context: string, startTime: number) => Promise<void>
+  onCapture?: () => Promise<{ text: string; startTime: number }>
+  onResume?: () => void
+}
+
+export default function CapturePanel({ canSave, onSave, onCapture, onResume }: Props) {
+  const [captured, setCaptured] = useState<{ text: string; startTime: number } | null>(null)
+  const [capturing, setCapturing] = useState(false)
+  const [selectedWord, setSelectedWord] = useState<string | null>(null)
+  const [comment, setComment] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [savedWord, setSavedWord] = useState<string | null>(null)
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+
+  const { entry, loading: dictLoading, error: dictError, lookup, clear: clearDict } = useDictionary()
+  // 문장 번역 + 단어 번역 — 각각 독립 훅 인스턴스
+  const { translation: sentTrans, loading: sentTransLoading, translate: transSent, clear: clearSentTrans } = useTranslation()
+  const { translation: wordTrans, translate: transWord, clear: clearWordTrans } = useTranslation()
+
+  async function handleCapture() {
+    if (!onCapture) return
+    setCapturing(true)
+    setCaptured(null)
+    setSelectedWord(null)
+    setSavedWord(null)
+    clearDict()
+    clearSentTrans()
+    clearWordTrans()
+    try {
+      const result = await onCapture()
+      if (result.text) {
+        setCaptured(result)
+        transSent(result.text)
+      }
+    } finally {
+      setCapturing(false)
+    }
+  }
+
+  function handleWordClick(word: string) {
+    setSelectedWord(word)
+    setSavedWord(null)
+    lookup(word)
+    transWord(word)
+  }
+
+  async function handleSave() {
+    if (!onSave || !selectedWord || !captured) return
+    setSaving(true)
+    try {
+      await onSave(selectedWord, comment, captured.text, captured.startTime)
+      setSavedWord(selectedWord)
+      setComment('')
+      setTimeout(() => setSavedWord(null), 2000)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  function handleResume() {
+    onResume?.()
+    setCaptured(null)
+    setSelectedWord(null)
+    clearDict()
+    clearSentTrans()
+    clearWordTrans()
+    setComment('')
+    setSavedWord(null)
+  }
+
+  function playAudio() {
+    if (!entry?.audio) return
+    audioRef.current?.pause()
+    audioRef.current = new Audio(entry.audio)
+    audioRef.current.play()
+  }
+
+  const allExamples = entry
+    ? entry.meanings.flatMap((m) => m.definitions.map((d) => d.example).filter(Boolean) as string[])
+    : []
+
+  return (
+    <div className="flex flex-col gap-4">
+
+      {/* ── 캡처 버튼 (미캡처 상태) ── */}
+      {!captured && (
+        <div className="flex flex-col items-center gap-3 rounded-xl border-2 border-dashed border-slate-200 bg-white py-8">
+          {onCapture ? (
+            <>
+              <button
+                onClick={handleCapture}
+                disabled={capturing}
+                className="flex items-center gap-2 rounded-xl bg-indigo-500 px-6 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-600 active:scale-95 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {capturing ? (
+                  <>
+                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                    캡처 중…
+                  </>
+                ) : (
+                  <>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="10" /><circle cx="12" cy="12" r="3" />
+                    </svg>
+                    자막 캡처
+                  </>
+                )}
+              </button>
+              <p className="text-xs text-slate-400">영상 재생 중 클릭하면 현재 문장을 캡처해요</p>
+            </>
+          ) : (
+            <p className="text-sm text-slate-400">확장 프로그램에서만 자막 캡처가 가능해요.</p>
+          )}
+        </div>
+      )}
+
+      {/* ── 캡처된 문장 ── */}
+      {captured && (
+        <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-4">
+          <div className="mb-2 flex items-center justify-between">
+            <p className="text-xs font-semibold uppercase tracking-wider text-indigo-400">
+              캡처된 문장
+            </p>
+            <button
+              onClick={handleResume}
+              className="flex items-center gap-1 rounded-lg border border-indigo-200 bg-white px-2.5 py-1 text-xs font-medium text-indigo-600 transition hover:bg-indigo-100"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="9" height="9" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M8 5v14l11-7z" />
+              </svg>
+              계속 재생
+            </button>
+          </div>
+
+          {/* 단어 칩 */}
+          <p className="text-sm leading-8 text-slate-800">
+            {tokenize(captured.text).map((token, i) =>
+              token.isWord ? (
+                <span
+                  key={i}
+                  onClick={() => handleWordClick(token.text)}
+                  className={`cursor-pointer rounded px-0.5 transition-colors hover:bg-indigo-200 hover:text-indigo-800 ${
+                    selectedWord?.toLowerCase() === token.text.toLowerCase()
+                      ? 'bg-indigo-200 font-semibold text-indigo-800'
+                      : ''
+                  }`}
+                >
+                  {token.text}
+                </span>
+              ) : (
+                <span key={i} className="text-slate-500">{token.text}</span>
+              ),
+            )}
+          </p>
+
+          {/* 문장 번역 */}
+          {sentTransLoading && (
+            <p className="mt-2 text-xs text-slate-400">번역 중…</p>
+          )}
+          {sentTrans && !sentTransLoading && (
+            <p className="mt-2 border-t border-indigo-200 pt-2 text-xs leading-relaxed text-indigo-700">
+              {sentTrans}
+            </p>
+          )}
+
+          {!selectedWord && (
+            <p className="mt-2 text-xs text-indigo-400">↑ 단어를 클릭해 사전을 확인하세요</p>
+          )}
+        </div>
+      )}
+
+      {/* ── 사전 카드 ── */}
+      {selectedWord && (
+        <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+
+          {dictLoading && (
+            <div className="flex items-center gap-2 text-sm text-slate-400">
+              <div className="h-4 w-4 animate-spin rounded-full border-2 border-indigo-400 border-t-transparent" />
+              사전 검색 중…
+            </div>
+          )}
+
+          {dictError && !dictLoading && (
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-slate-500">
+                <span className="font-semibold text-slate-700">"{selectedWord}"</span> — {dictError}
+              </p>
+              <a
+                href={`https://www.google.com/search?q=define+${encodeURIComponent(selectedWord)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="ml-3 shrink-0 text-xs text-indigo-500 underline-offset-2 hover:underline"
+              >
+                Google에서 찾기 →
+              </a>
+            </div>
+          )}
+
+          {entry && !dictLoading && (
+            <div className="flex flex-col gap-4">
+              {/* 단어 헤더 */}
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="text-xl font-bold text-slate-800">{entry.word}</h3>
+                {entry.phonetic && (
+                  <span className="text-sm text-slate-400">{entry.phonetic}</span>
+                )}
+                {wordTrans && (
+                  <span className="rounded-full bg-indigo-100 px-2.5 py-0.5 text-sm font-medium text-indigo-700">
+                    {wordTrans}
+                  </span>
+                )}
+                {entry.audio && (
+                  <button
+                    onClick={playAudio}
+                    title="발음 듣기"
+                    className="flex h-7 w-7 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:border-indigo-300 hover:text-indigo-500"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M8 5v14l11-7z" />
+                    </svg>
+                  </button>
+                )}
+                <a
+                  href={`https://www.google.com/search?q=define+${encodeURIComponent(entry.word)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="ml-auto text-xs text-slate-400 underline-offset-2 hover:text-indigo-500 hover:underline"
+                >
+                  더 보기 →
+                </a>
+              </div>
+
+              {/* 뜻 */}
+              <div className="flex flex-col gap-3">
+                {entry.meanings.map((m, i) => (
+                  <div key={i} className="flex flex-col gap-1">
+                    <span className={`text-xs font-semibold uppercase tracking-wider ${PART_OF_SPEECH_COLOR[m.partOfSpeech] ?? 'text-indigo-500'}`}>
+                      {m.partOfSpeech}
+                    </span>
+                    {m.definitions.map((d, j) => (
+                      <div key={j} className="flex gap-1.5 pl-1 text-sm text-slate-700">
+                        <span className="mt-1 shrink-0 text-[8px] text-slate-300">●</span>
+                        <span>{d.definition}</span>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+
+              {/* 예문 섹션 */}
+              {allExamples.length > 0 && (
+                <div className="rounded-lg bg-indigo-50 px-4 py-3">
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-indigo-400">예문</p>
+                  <div className="flex flex-col gap-2">
+                    {allExamples.map((ex, i) => (
+                      <p key={i} className="text-sm italic leading-relaxed text-indigo-700">
+                        "{ex}"
+                      </p>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* 코멘트 + 저장 */}
+              {canSave && onSave && captured && (
+                <div className="flex flex-col gap-2 border-t border-slate-100 pt-4">
+                  <textarea
+                    value={comment}
+                    onChange={(e) => setComment(e.target.value)}
+                    placeholder="코멘트 (선택)"
+                    rows={2}
+                    className="resize-none rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+                  />
+                  <div className="flex items-center justify-end gap-2">
+                    <button
+                      onClick={handleResume}
+                      className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-600 transition hover:bg-slate-50"
+                    >
+                      ▶ 계속 재생
+                    </button>
+                    <button
+                      onClick={handleSave}
+                      disabled={saving}
+                      className={`rounded-lg px-4 py-2 text-sm font-medium transition disabled:cursor-not-allowed ${
+                        savedWord
+                          ? 'bg-green-50 text-green-600'
+                          : 'bg-indigo-500 text-white hover:bg-indigo-600 disabled:opacity-50'
+                      }`}
+                    >
+                      {saving ? (
+                        <span className="flex items-center gap-1.5">
+                          <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                          저장 중…
+                        </span>
+                      ) : savedWord ? (
+                        '저장됨 ✓'
+                      ) : (
+                        '저장'
+                      )}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
