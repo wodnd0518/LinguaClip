@@ -7,19 +7,38 @@ const subtitleHistory: SubtitleEntry[] = []
 let lastCaptionText = ''
 
 /**
- * YouTube 자동자막은 이전 청크를 포함해서 표시되는 경우가 많음.
- * 예) "I took the offer" → "I took the offer and funny"
- * → suffix-prefix 겹침을 제거해 하나의 문장으로 병합.
+ * YouTube 자동자막 병합 — 점진적 표시 방식 대응
+ *
+ * YouTube는 자막을 이렇게 표시함:
+ *   1) "I quit my two jobs"
+ *   2) "I quit my two jobs I vowed to hit YouTube"
+ *   3) "the two jobs I vowed to hit YouTube as hard as I possibly could"
+ *
+ * → 뒤 chunk에 완전히 포함된 앞 chunk를 먼저 제거한 뒤,
+ *   남은 chunk들의 suffix-prefix 겹침을 제거해 하나의 문장으로 병합.
  */
 function mergeSubtitleChunks(chunks: string[]): string {
-  if (chunks.length === 0) return ''
-  let result = chunks[0]
-  for (let i = 1; i < chunks.length; i++) {
-    const next = chunks[i]
-    if (!next) continue
-    // result 끝 부분이 next 앞 부분과 겹치면 겹친 부분 제거
-    const maxOverlap = Math.min(result.length, next.length, 100)
+  const trimmed = chunks.map((c) => c.trim()).filter(Boolean)
+  if (trimmed.length === 0) return ''
+  if (trimmed.length === 1) return trimmed[0]
+
+  // 1단계: 뒤에 오는 chunk에 이미 포함된 chunk 제거
+  const filtered = trimmed.filter((chunk, i) => {
+    const laterChunks = trimmed.slice(i + 1)
+    return !laterChunks.some((later) =>
+      later.toLowerCase().includes(chunk.toLowerCase()),
+    )
+  })
+  const deduped = filtered.length > 0 ? filtered : [trimmed[trimmed.length - 1]]
+  if (deduped.length === 1) return deduped[0]
+
+  // 2단계: 남은 chunk들의 suffix-prefix 겹침 제거 후 병합
+  let result = deduped[0]
+  for (let i = 1; i < deduped.length; i++) {
+    const next = deduped[i]
+    if (result.toLowerCase().includes(next.toLowerCase())) continue
     let overlapLen = 0
+    const maxOverlap = Math.min(result.length, next.length, 120)
     for (let len = maxOverlap; len >= 4; len--) {
       if (result.slice(-len).toLowerCase() === next.slice(0, len).toLowerCase()) {
         overlapLen = len
@@ -52,7 +71,6 @@ function onCaptionChange() {
 }
 
 function setupCaptionObserver() {
-  // #movie_player 가 SPA 렌더 후에도 항상 존재하는 YouTube 플레이어 루트
   const player = document.querySelector('#movie_player')
   if (!player) {
     setTimeout(setupCaptionObserver, 1000)
@@ -107,6 +125,30 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true
   }
 
+  if (message.type === 'YT_PLAY_SEGMENT') {
+    // 지정 구간만 재생 후 정지 (쉐도잉용)
+    const from = message.from as number
+    const duration = (message.duration as number) ?? 7
+    const video = getVideo()
+    if (!video) { sendResponse({ ok: false }); return true }
+
+    video.currentTime = from
+    video.play()
+
+    const endTime = from + duration
+    const timer = setInterval(() => {
+      const v = getVideo()
+      if (!v || v.paused) { clearInterval(timer); return }
+      if (v.currentTime >= endTime) {
+        v.pause()
+        clearInterval(timer)
+      }
+    }, 150)
+
+    sendResponse({ ok: true })
+    return true
+  }
+
   if (message.type === 'YT_CAPTURE_SENTENCE') {
     const video = getVideo()
     const captureTime = video?.currentTime ?? 0
@@ -121,15 +163,27 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     // 일시정지 상태면 잠깐 재생해 뒤 자막도 수집
     if (video?.paused) video.play()
 
-    // 1.5초 더 재생한 뒤 정지 → 앞 3초 + 뒤 1.5초 구간 병합
+    // 1.5초 더 재생한 뒤 정지
     setTimeout(() => {
       const v = getVideo()
       if (v && !v.paused) v.pause()
 
-      // captureTime 기준 앞 3초 이내 항목만 사용
+      // captureTime 기준 앞 3초 이내 항목
       const pool = subtitleHistory.filter((e) => e.time >= captureTime - 3)
-      const merged = mergeSubtitleChunks(pool.map((e) => e.text))
-      const startTime = pool[0]?.time ?? captureTime
+
+      // pool 안에서 마지막 문장 끝 이후부터가 현재 문장
+      let sentenceStartIdx = 0
+      for (let i = pool.length - 2; i >= 0; i--) {
+        if (/[.!?]\s*$/.test(pool[i].text)) {
+          sentenceStartIdx = i + 1
+          break
+        }
+      }
+
+      const entries = pool.slice(sentenceStartIdx)
+      const merged = mergeSubtitleChunks(entries.map((e) => e.text))
+      // startTime = 현재 문장이 시작된 시점 (문장 경계 이후 첫 항목)
+      const startTime = entries[0]?.time ?? captureTime
 
       // 이력 초기화
       subtitleHistory.length = 0

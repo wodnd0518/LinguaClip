@@ -92,5 +92,13 @@ export function useYouTubeTab() {
     })
   }, [])
 
-  return { videoInfo, isOnYouTube, seekTo, navigateTab, getSubtitle, captureSubtitle, resumeVideo }
+  // 쉐도잉: from 시점부터 duration초간 재생 후 자동 정지
+  const playShadow = useCallback((from: number, duration = 7) => {
+    if (!IS_EXT || !tabIdRef.current) return
+    chrome.tabs.sendMessage(tabIdRef.current, { type: 'YT_PLAY_SEGMENT', from, duration }, () => {
+      if (chrome.runtime.lastError) { /* ignore */ }
+    })
+  }, [])
+
+  return { videoInfo, isOnYouTube, seekTo, navigateTab, getSubtitle, captureSubtitle, resumeVideo, playShadow }
 }

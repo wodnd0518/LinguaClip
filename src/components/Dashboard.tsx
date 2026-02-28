@@ -28,7 +28,7 @@ export default function Dashboard() {
   const { user, signOutUser } = useAuth()
 
   // 확장 프로그램: YouTube 탭 연동
-  const { videoInfo, isOnYouTube, seekTo: ytSeekTo, navigateTab, captureSubtitle, resumeVideo } = useYouTubeTab()
+  const { videoInfo, isOnYouTube, seekTo: ytSeekTo, navigateTab, captureSubtitle, resumeVideo, playShadow } = useYouTubeTab()
 
   // 웹 전용: URL 입력 + IFrame 플레이어
   const [urlInput, setUrlInput] = useState('')
@@ -84,9 +84,22 @@ export default function Dashboard() {
     }
   }
 
-  // 쉐도잉: 해당 타임스탬프로 이동 후 영상 재생 (handleSeek와 동일하게 이동)
+  // 쉐도잉: 해당 구간만 재생 후 자동 정지 (같은 영상) / 다른 영상이면 이동
   function handleShadow(clip: Clip) {
-    handleSeek(clip) // 이동하면 YouTube가 자동 재생됨
+    if (IS_EXT) {
+      if (clip.videoId === videoInfo?.videoId) {
+        playShadow(clip.timestamp, 7) // 7초간 재생 후 정지
+      } else {
+        navigateTab(clip.videoId, clip.timestamp)
+      }
+      return
+    }
+    if (clip.videoId === videoId) {
+      playerRef.current?.seekTo(clip.timestamp)
+    } else {
+      setVideoId(clip.videoId)
+      setUrlInput(`https://www.youtube.com/watch?v=${clip.videoId}`)
+    }
   }
 
   const canSave = IS_EXT ? isOnYouTube : !!videoId
