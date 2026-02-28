@@ -22,6 +22,57 @@ function parseJson3(events: CaptionSegment[]) {
     .filter((l) => l.text)
 }
 
+function parseSrv3(xml: string) {
+  const lines: { start: number; dur: number; text: string }[] = []
+  // <p t="시작ms" d="지속ms" ...>텍스트</p> 패턴
+  const re = /<p[^>]+\bt="(\d+)"[^>]+\bd="(\d+)"[^>]*>([\s\S]*?)<\/p>/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(xml)) !== null) {
+    // HTML 태그 및 엔티티 제거
+    const text = m[3]
+      .replace(/<[^>]+>/g, '')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/\n/g, ' ')
+      .trim()
+    if (text) lines.push({ start: Number(m[1]) / 1000, dur: Number(m[2]) / 1000, text })
+  }
+  return lines
+}
+
+async function fetchCaption(baseUrl: string) {
+  const headers = {
+    'User-Agent':
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Accept-Language': 'en-US,en;q=0.9',
+  }
+
+  // 1차 시도: json3 포맷
+  const json3Res = await fetch(`${baseUrl}&fmt=json3`, { headers })
+  if (json3Res.ok) {
+    const text = await json3Res.text()
+    if (text.trim() && !text.trim().startsWith('<')) {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const data: any = JSON.parse(text)
+        return { lines: parseJson3(data.events), format: 'json3' }
+      } catch {
+        // json3 파싱 실패 → srv3 fallback
+      }
+    }
+  }
+
+  // 2차 시도: srv3 XML 포맷
+  const srv3Res = await fetch(`${baseUrl}&fmt=srv3`, { headers })
+  if (!srv3Res.ok) return null
+  const xml = await srv3Res.text()
+  if (!xml.trim()) return null
+  return { lines: parseSrv3(xml), format: 'srv3' }
+}
+
 export async function onRequestGet({ request }: { request: Request }) {
   const { searchParams } = new URL(request.url)
   const videoId = searchParams.get('v')
@@ -65,17 +116,14 @@ export async function onRequestGet({ request }: { request: Request }) {
       return Response.json({ lines: [], languages: [], error: '자막 트랙을 찾을 수 없어요.' })
     }
 
-    const captionRes = await fetch(`${track.baseUrl}&fmt=json3`)
-    if (!captionRes.ok) {
+    const result = await fetchCaption(track.baseUrl)
+    if (!result) {
       return Response.json({ lines: [], languages: [], error: '자막 데이터를 불러올 수 없어요.' }, { status: 502 })
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const data: any = await captionRes.json()
-
     return Response.json(
       {
-        lines: parseJson3(data.events),
+        lines: result.lines,
         languages: tracks.map((t) => ({
           code: t.languageCode,
           name: t.name?.simpleText ?? t.languageCode,
