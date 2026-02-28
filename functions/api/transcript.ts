@@ -1,19 +1,5 @@
 // Cloudflare Pages Function — YouTube 자막 프록시
-// YouTube InnerTube API를 사용 (영상 하단 "스크립트 표시" 버튼과 동일한 방식)
-
-const YT_HEADERS = {
-  'Content-Type': 'application/json',
-  'User-Agent':
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-  'Accept-Language': 'en-US,en;q=0.9',
-  'X-YouTube-Client-Name': '1',
-  'X-YouTube-Client-Version': '2.20240101.00.00',
-  Origin: 'https://www.youtube.com',
-  Referer: 'https://www.youtube.com/',
-}
-
-// InnerTube API 키 (YouTube 페이지에 하드코딩된 공개 키)
-const INNERTUBE_KEY = 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8'
+// YouTube InnerTube API 사용 (영상 하단 "스크립트 표시" 버튼과 동일한 방식)
 
 // proto 직렬화:
 //   field 1 (string) = videoId
@@ -68,32 +54,85 @@ export async function onRequestGet({ request }: { request: Request }) {
   }
 
   try {
-    const params = buildParams(videoId)
-
-    const res = await fetch(`https://www.youtube.com/youtubei/v1/get_transcript?key=${INNERTUBE_KEY}`, {
-      method: 'POST',
-      headers: YT_HEADERS,
-      body: JSON.stringify({
-        context: {
-          client: {
-            clientName: 'WEB',
-            clientVersion: '2.20240101.00.00',
-            hl: lang,
-            gl: 'US',
-          },
-        },
-        params,
-      }),
+    // 1단계: YouTube 페이지에서 INNERTUBE_API_KEY + visitorData 추출
+    const pageRes = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9',
+      },
     })
 
-    if (!res.ok) {
+    if (!pageRes.ok) {
       return Response.json(
-        { lines: [], languages: [], error: `InnerTube 오류 (${res.status})` },
+        { lines: [], languages: [], error: `영상 페이지 오류 (${pageRes.status})` },
         { status: 502 },
       )
     }
 
-    const text = await res.text()
+    const html = await pageRes.text()
+
+    // InnerTube API 키 (페이지에 항상 최신 키가 포함됨)
+    const apiKeyMatch = html.match(/"INNERTUBE_API_KEY":"([^"]+)"/)
+    const apiKey = apiKeyMatch?.[1] ?? ''
+
+    // visitorData (세션 식별자)
+    const visitorDataMatch = html.match(/"visitorData":"([^"]+)"/)
+    const visitorData = visitorDataMatch?.[1] ?? ''
+
+    // clientVersion
+    const clientVersionMatch = html.match(/"INNERTUBE_CLIENT_VERSION":"([^"]+)"/)
+    const clientVersion = clientVersionMatch?.[1] ?? '2.20240101.01.00'
+
+    if (!apiKey) {
+      return Response.json(
+        { lines: [], languages: [], error: 'YouTube 페이지에서 API 키를 찾을 수 없어요.' },
+        { status: 502 },
+      )
+    }
+
+    // 2단계: InnerTube get_transcript 호출
+    const params = buildParams(videoId)
+
+    const transcriptRes = await fetch(
+      `https://www.youtube.com/youtubei/v1/get_transcript?key=${apiKey}&prettyPrint=false`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept-Language': 'en-US,en;q=0.9',
+          ...(visitorData ? { 'X-Goog-Visitor-Id': visitorData } : {}),
+        },
+        body: JSON.stringify({
+          context: {
+            client: {
+              clientName: 'WEB',
+              clientVersion,
+              hl: lang,
+              gl: 'US',
+              ...(visitorData ? { visitorData } : {}),
+            },
+          },
+          params,
+        }),
+      },
+    )
+
+    if (!transcriptRes.ok) {
+      const body = await transcriptRes.text()
+      return Response.json(
+        {
+          lines: [],
+          languages: [],
+          error: `InnerTube 오류 (${transcriptRes.status}): ${body.slice(0, 200)}`,
+        },
+        { status: 502 },
+      )
+    }
+
+    const text = await transcriptRes.text()
     if (!text.trim()) {
       return Response.json(
         { lines: [], languages: [], error: 'InnerTube 응답이 비어있어요.' },
@@ -107,17 +146,16 @@ export async function onRequestGet({ request }: { request: Request }) {
       data = JSON.parse(text)
     } catch {
       return Response.json(
-        { lines: [], languages: [], error: `InnerTube 파싱 실패: ${text.slice(0, 120)}` },
+        { lines: [], languages: [], error: `JSON 파싱 실패: ${text.slice(0, 120)}` },
         { status: 502 },
       )
     }
 
     const lines = parseSegments(data)
     if (lines.length === 0) {
-      // 디버그: 응답 구조 일부 반환
-      const preview = JSON.stringify(data).slice(0, 300)
+      const preview = JSON.stringify(data).slice(0, 400)
       return Response.json(
-        { lines: [], languages: [], error: `자막 세그먼트 없음: ${preview}` },
+        { lines: [], languages: [], error: `세그먼트 없음: ${preview}` },
         { status: 502 },
       )
     }
@@ -125,7 +163,6 @@ export async function onRequestGet({ request }: { request: Request }) {
     return Response.json(
       {
         lines,
-        // InnerTube는 언어 목록을 별도로 제공하지 않으므로 현재 언어만 반환
         languages: [{ code: lang, name: lang.toUpperCase() }],
         selectedLang: lang,
       },
