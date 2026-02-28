@@ -52,33 +52,40 @@ async function fetchCaption(baseUrl: string): Promise<{ lines: ReturnType<typeof
 
   // 1차 시도: json3 포맷
   const json3Res = await fetch(`${baseUrl}&fmt=json3`, { headers })
-  const json3Status = json3Res.status
   if (json3Res.ok) {
     const text = await json3Res.text()
-    if (text.trim() && !text.trim().startsWith('<')) {
-      try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const data: any = JSON.parse(text)
-        return { lines: parseJson3(data.events), format: 'json3' }
-      } catch (e) {
-        // json3 파싱 실패 → srv3 fallback
-        console.error('json3 parse failed:', e, text.slice(0, 100))
+    const trimmed = text.trim()
+    if (trimmed) {
+      if (trimmed.startsWith('{')) {
+        // JSON 응답
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const data: any = JSON.parse(trimmed)
+          return { lines: parseJson3(data.events), format: 'json3' }
+        } catch {
+          // JSON 파싱 실패 → XML fallback
+        }
+      } else if (trimmed.startsWith('<')) {
+        // YouTube가 XML로 응답한 경우 (자동 생성 자막 등)
+        const lines = parseSrv3(trimmed)
+        if (lines.length > 0) return { lines, format: 'json3-xml' }
       }
     }
   }
 
   // 2차 시도: srv3 XML 포맷
   const srv3Res = await fetch(`${baseUrl}&fmt=srv3`, { headers })
-  const srv3Status = srv3Res.status
   if (srv3Res.ok) {
     const xml = await srv3Res.text()
     if (xml.trim()) {
-      return { lines: parseSrv3(xml), format: 'srv3' }
+      const lines = parseSrv3(xml.trim())
+      if (lines.length > 0) return { lines, format: 'srv3' }
+      // XML은 왔지만 파싱된 줄이 없는 경우 — 처음 300자를 디버그로 반환
+      return { error: `XML 파싱 결과 없음: ${xml.slice(0, 300)}` }
     }
-    return { error: `srv3 응답이 비어있어요. (json3: ${json3Status}, srv3: ${srv3Status})` }
   }
 
-  return { error: `자막 URL 접근 실패 — json3: ${json3Status}, srv3: ${srv3Status}` }
+  return { error: '자막 데이터를 불러올 수 없어요. (json3/srv3 모두 실패)' }
 }
 
 export async function onRequestGet({ request }: { request: Request }) {
