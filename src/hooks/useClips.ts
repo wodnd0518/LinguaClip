@@ -21,6 +21,7 @@ export interface Clip {
   sentence: string
   videoId: string
   timestamp: number // seconds
+  comment?: string
   createdAt: Timestamp | null
 }
 
@@ -59,7 +60,7 @@ export function useClips(userId: string) {
     return unsub
   }, [userId, storageKey])
 
-  async function saveClip(sentence: string, videoId: string, timestamp: number): Promise<void> {
+  async function saveClip(sentence: string, videoId: string, timestamp: number, comment?: string): Promise<void> {
     if (IS_EXT) {
       const newClip: Clip = {
         id: crypto.randomUUID(),
@@ -67,6 +68,7 @@ export function useClips(userId: string) {
         sentence,
         videoId,
         timestamp,
+        comment,
         createdAt: null,
       }
       const updated = [newClip, ...clips]
@@ -82,6 +84,7 @@ export function useClips(userId: string) {
         sentence,
         videoId,
         timestamp,
+        comment,
         createdAt: null,
       }
       setClips((prev) => [newClip, ...prev])
@@ -93,6 +96,7 @@ export function useClips(userId: string) {
       sentence,
       videoId,
       timestamp,
+      ...(comment ? { comment } : {}),
       createdAt: serverTimestamp(),
     })
   }

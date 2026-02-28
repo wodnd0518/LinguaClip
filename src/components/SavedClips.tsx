@@ -141,8 +141,13 @@ export default function SavedClips({ clips, loading, currentVideoId, onSeek, onD
               {formatTime(clip.timestamp)}
             </button>
 
-            {/* 문장 */}
-            <p className="flex-1 text-sm leading-relaxed text-slate-800">{clip.sentence}</p>
+            {/* 단어 + 코멘트 */}
+            <div className="flex flex-1 flex-col gap-0.5">
+              <p className="text-sm font-medium leading-relaxed text-slate-800">{clip.sentence}</p>
+              {clip.comment && (
+                <p className="text-xs leading-relaxed text-slate-400">{clip.comment}</p>
+              )}
+            </div>
 
             {/* YouTube에서 열기 */}
             <a

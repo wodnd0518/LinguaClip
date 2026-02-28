@@ -4,7 +4,7 @@ import { IS_EXT } from '../lib/env'
 import { useYouTubeTab } from '../hooks/useYouTubeTab'
 import YouTubePlayer, { type YouTubePlayerHandle } from './YouTubePlayer'
 import YouTubeStatus from './YouTubeStatus'
-import SubtitlePanel from './SubtitlePanel'
+import WordSearchPanel from './WordSearchPanel'
 import SavedClips from './SavedClips'
 import { useClips, type Clip } from '../hooks/useClips'
 
@@ -61,8 +61,8 @@ export default function Dashboard() {
     setVideoId(id)
   }
 
-  async function handleSave(sentence: string): Promise<void> {
-    await saveClip(sentence, getCurrentVideoId(), getCurrentTime())
+  async function handleSave(word: string, comment: string): Promise<void> {
+    await saveClip(word, getCurrentVideoId(), getCurrentTime(), comment)
   }
 
   function handleSeek(clip: Clip) {
@@ -161,10 +161,10 @@ export default function Dashboard() {
             )}
           </div>
 
-          {/* 오른쪽: 자막 + 사전 */}
+          {/* 오른쪽: 단어 검색 + 저장 */}
           <div className="lg:flex-1">
-            <SubtitlePanel
-              currentVideoId={getCurrentVideoId() || null}
+            <WordSearchPanel
+              canSave={canSave}
               onSave={canSave ? handleSave : undefined}
             />
           </div>
