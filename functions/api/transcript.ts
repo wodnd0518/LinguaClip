@@ -47,23 +47,11 @@ export async function onRequestGet({ request }: { request: Request }) {
       return Response.json({ error: '자막 트랙을 찾을 수 없어요.' })
     }
 
-    // signed URL에서 lang/name/kind만 추출 → 서명 없는 단순 URL 구성
-    // (브라우저가 직접 fetch하므로 서명 불필요)
-    const parsed = new URL(track.baseUrl)
-    const trackLang = parsed.searchParams.get('lang') ?? track.languageCode
-    const trackName = parsed.searchParams.get('name') ?? track.name?.simpleText ?? ''
-    const trackKind = parsed.searchParams.get('kind') ?? track.kind ?? ''
-
-    const captionUrl = new URL('https://www.youtube.com/api/timedtext')
-    captionUrl.searchParams.set('v', videoId)
-    captionUrl.searchParams.set('lang', trackLang)
-    if (trackName) captionUrl.searchParams.set('name', trackName)
-    if (trackKind) captionUrl.searchParams.set('kind', trackKind)
-    captionUrl.searchParams.set('fmt', 'json3')
-
+    // signed baseUrl을 그대로 브라우저에 전달
+    // 브라우저(사용자 IP + YouTube 쿠키)에서 fetch하면 서명된 URL이 정상 작동
     return Response.json(
       {
-        captionUrl: captionUrl.toString(),
+        captionUrl: track.baseUrl,
         languages: tracks.map((t) => ({
           code: t.languageCode,
           name: t.name?.simpleText ?? t.languageCode,
