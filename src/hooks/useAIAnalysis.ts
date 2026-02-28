@@ -6,16 +6,14 @@ export interface AIAnalysis {
   relatedPhrases: string   // 유사 표현
 }
 
-const API_KEY = import.meta.env.VITE_ANTHROPIC_API_KEY as string | undefined
-
-export function useAIAnalysis() {
+export function useAIAnalysis(apiKey: string | null) {
   const [analysis, setAnalysis] = useState<AIAnalysis | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const cacheRef = useRef<Map<string, AIAnalysis>>(new Map())
 
   const analyze = useCallback(async (sentence: string, word: string, wordTranslation?: string) => {
-    if (!API_KEY) { setError('no_key'); return }
+    if (!apiKey) { setError('no_key'); return }
     const cacheKey = `${sentence}||${word}`
     if (cacheRef.current.has(cacheKey)) {
       setAnalysis(cacheRef.current.get(cacheKey)!)
@@ -41,7 +39,7 @@ export function useAIAnalysis() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-api-key': API_KEY,
+          'x-api-key': apiKey,
           'anthropic-version': '2023-06-01',
           'anthropic-dangerous-direct-browser-access': 'true',
         },
@@ -62,12 +60,12 @@ export function useAIAnalysis() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [apiKey])
 
   const clear = useCallback(() => {
     setAnalysis(null)
     setError(null)
   }, [])
 
-  return { analysis, loading, error, analyze, clear, hasKey: !!API_KEY }
+  return { analysis, loading, error, analyze, clear }
 }
