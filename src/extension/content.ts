@@ -24,21 +24,28 @@ function parseJson3(events: CaptionSegment[]) {
 }
 
 async function fetchTranscript(videoId: string, lang: string) {
-  // content script는 YouTube 페이지 컨텍스트에서 실행되므로 CORS 없이 fetch 가능
-  const pageRes = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
-    headers: { 'Accept-Language': 'en-US,en;q=0.9' },
-  })
-  const html = await pageRes.text()
+  // 1차: 현재 페이지의 ytInitialPlayerResponse에서 captionTracks 직접 읽기
+  // (이미 메모리에 있으므로 추가 fetch 불필요)
+  type Track = { baseUrl: string; languageCode: string; name?: { simpleText?: string }; kind?: string }
+  let tracks: Track[] | null = null
 
-  const tracksMatch = html.match(/"captionTracks":(\[.*?\])/)
-  if (!tracksMatch) return { lines: [], languages: [], error: '이 영상에는 자막이 없어요.' }
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const ipr = (window as any).ytInitialPlayerResponse
+    const raw = ipr?.captions?.playerCaptionsTracklistRenderer?.captionTracks
+    if (Array.isArray(raw) && raw.length > 0) tracks = raw as Track[]
+  } catch { /* ignore */ }
 
-  const tracks: {
-    baseUrl: string
-    languageCode: string
-    name?: { simpleText?: string }
-    kind?: string
-  }[] = JSON.parse(tracksMatch[1])
+  // 2차: 페이지 fetch fallback
+  if (!tracks) {
+    const pageRes = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
+      headers: { 'Accept-Language': 'en-US,en;q=0.9' },
+    })
+    const html = await pageRes.text()
+    const tracksMatch = html.match(/"captionTracks":(\[.*?\])/)
+    if (!tracksMatch) return { lines: [], languages: [], error: '이 영상에는 자막이 없어요.' }
+    tracks = JSON.parse(tracksMatch[1]) as Track[]
+  }
 
   const track =
     tracks.find((t) => t.languageCode === lang) ??
@@ -47,8 +54,18 @@ async function fetchTranscript(videoId: string, lang: string) {
 
   if (!track) return { lines: [], languages: [], error: '자막 트랙을 찾을 수 없어요.' }
 
-  const captionRes = await fetch(`${track.baseUrl}&fmt=json3`)
-  const data: { events: CaptionSegment[] } = await captionRes.json()
+  // baseUrl에 이미 fmt가 포함되어 있으면 추가하지 않음
+  const captionUrl = track.baseUrl.includes('fmt=')
+    ? track.baseUrl
+    : `${track.baseUrl}&fmt=json3`
+
+  const captionRes = await fetch(captionUrl)
+  if (!captionRes.ok) return { lines: [], languages: [], error: `자막 fetch 실패 (${captionRes.status})` }
+
+  const text = await captionRes.text()
+  if (!text.trim()) return { lines: [], languages: [], error: '자막 응답이 비어있어요.' }
+
+  const data: { events: CaptionSegment[] } = JSON.parse(text)
 
   return {
     lines: parseJson3(data.events),
