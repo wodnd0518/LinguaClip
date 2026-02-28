@@ -168,12 +168,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       const anchorText = currentText || merged
       const anchorWords = anchorText
         .split(/\s+/).filter((w) => /[A-Za-z]/.test(w)).slice(0, 2).join(' ').toLowerCase()
-      let startTime = Math.max(0, (pool[0]?.time ?? captureTime) - 0.3)
+      let startTime = Math.max(0, (pool[0]?.time ?? captureTime) - 1.2)
       if (anchorWords) {
         for (let i = 0; i < pool.length; i++) {
           if (pool[i].time > captureTime) break // captureTime 이후 항목 제외
           if (pool[i].text.toLowerCase().includes(anchorWords)) {
-            startTime = Math.max(0, pool[i].time - 0.3)
+            startTime = Math.max(0, pool[i].time - 1.2)
             break
           }
         }
