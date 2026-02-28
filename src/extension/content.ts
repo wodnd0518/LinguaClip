@@ -154,8 +154,17 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       }
       const entries = pool.slice(sentenceStartIdx)
       const merged = mergeSubtitleChunks(entries.map((e) => e.text))
-      // 자막 표시는 실제 발화보다 0.8초 늦게 나타남 → 앞당겨 보정
-      const startTime = Math.max(0, (entries[0]?.time ?? captureTime) - 0.8)
+
+      // merged의 첫 3단어가 subtitleHistory에서 처음 등장한 시점을 startTime으로 사용
+      // → 잘못된 문장 경계(중간 마침표 등)로 entries[0].time이 너무 늦어지는 문제 해결
+      const startWords = merged.split(/\s+/).slice(0, 3).join(' ').toLowerCase()
+      let startTime = Math.max(0, (pool[0]?.time ?? captureTime) - 0.5)
+      for (let i = 0; i < subtitleHistory.length; i++) {
+        if (subtitleHistory[i].text.toLowerCase().includes(startWords)) {
+          startTime = Math.max(0, subtitleHistory[i].time - 0.5)
+          break
+        }
+      }
 
       subtitleHistory.length = 0
       lastCaptionText = ''
