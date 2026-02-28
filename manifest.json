@@ -3,7 +3,7 @@
   "name": "LinguaClip",
   "description": "YouTube 영상으로 배우는 나만의 영어 사전",
   "version": "1.0.0",
-  "permissions": ["sidePanel", "tabs", "storage"],
+  "permissions": ["sidePanel", "tabs", "storage", "scripting"],
   "host_permissions": ["*://www.youtube.com/*"],
   "background": {
     "service_worker": "background.js",

@@ -29,21 +29,17 @@ export function useTranscript() {
     setError(null)
     try {
       if (IS_EXT) {
-        // 확장 모드: content script가 YouTube 페이지 context에서 직접 fetch
-        // (사용자 쿠키 + YouTube 도메인 권한으로 자막 접근 가능)
+        // 확장 모드: background service worker가 scripting.executeScript(MAIN world)로
+        // YouTube 페이지 context에서 fetch → 사용자 쿠키 자동 포함
         const result = await new Promise<TranscriptResult>((resolve, reject) => {
-          chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-            if (!tabs[0]?.id) return reject(new Error('YouTube 탭을 찾을 수 없어요.'))
-            chrome.tabs.sendMessage(
-              tabs[0].id,
-              { type: 'YT_GET_TRANSCRIPT', videoId, lang },
-              (response) => {
-                if (chrome.runtime.lastError)
-                  return reject(new Error(chrome.runtime.lastError.message))
-                resolve(response as TranscriptResult)
-              },
-            )
-          })
+          chrome.runtime.sendMessage(
+            { type: 'YT_GET_TRANSCRIPT', videoId, lang },
+            (response) => {
+              if (chrome.runtime.lastError)
+                return reject(new Error(chrome.runtime.lastError.message))
+              resolve(response as TranscriptResult)
+            },
+          )
         })
         if (result.error) { setError(result.error); return null }
         return result
