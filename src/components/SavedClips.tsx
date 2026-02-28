@@ -34,9 +34,10 @@ interface Props {
   currentVideoId: string | null
   onSeek: (clip: Clip) => void
   onDelete: (clipId: string) => Promise<void>
+  onShadow?: (clip: Clip) => void  // 쉐도잉: 해당 구간 바로 재생
 }
 
-export default function SavedClips({ clips, loading, currentVideoId, onSeek, onDelete }: Props) {
+export default function SavedClips({ clips, loading, currentVideoId, onSeek, onDelete, onShadow }: Props) {
   const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set())
   const [searchQuery, setSearchQuery] = useState('')
 
@@ -144,27 +145,41 @@ export default function SavedClips({ clips, loading, currentVideoId, onSeek, onD
             key={clip.id}
             className="group flex items-start gap-3 rounded-xl border border-slate-200 bg-white p-4 transition hover:border-indigo-200 hover:shadow-sm"
           >
-            {/* 타임스탬프 — 클릭 시 이동 */}
-            <button
-              onClick={() => onSeek(clip)}
-              title={isSameVideo ? '이 타임스탬프로 이동' : '이 영상 불러오기'}
-              className="mt-0.5 flex shrink-0 items-center gap-1 rounded-md bg-slate-100 px-2 py-1 font-mono text-xs text-slate-600 transition hover:bg-indigo-100 hover:text-indigo-700"
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="9"
-                height="9"
-                viewBox="0 0 24 24"
-                fill="currentColor"
+            {/* 타임스탬프 이동 + 쉐도잉 재생 */}
+            <div className="mt-0.5 flex shrink-0 flex-col gap-1">
+              <button
+                onClick={() => onSeek(clip)}
+                title={isSameVideo ? '이 타임스탬프로 이동' : '이 영상 불러오기'}
+                className="flex items-center gap-1 rounded-md bg-slate-100 px-2 py-1 font-mono text-xs text-slate-600 transition hover:bg-indigo-100 hover:text-indigo-700"
               >
-                <path d="M8 5v14l11-7z" />
-              </svg>
-              {formatTime(clip.timestamp)}
-            </button>
+                <svg xmlns="http://www.w3.org/2000/svg" width="9" height="9" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M8 5v14l11-7z" />
+                </svg>
+                {formatTime(clip.timestamp)}
+              </button>
+              {onShadow && (
+                <button
+                  onClick={() => onShadow(clip)}
+                  title="이 구간 쉐도잉 재생"
+                  className="flex items-center justify-center gap-1 rounded-md bg-amber-50 px-2 py-1 text-xs text-amber-600 transition hover:bg-amber-100"
+                >
+                  {/* 반복 재생 아이콘 */}
+                  <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/>
+                  </svg>
+                  쉐도잉
+                </button>
+              )}
+            </div>
 
-            {/* 단어 + 문장 + 코멘트 */}
+            {/* 단어 + 한국어 뜻 + 문장 + 코멘트 */}
             <div className="flex flex-1 flex-col gap-1">
-              <p className="text-sm font-semibold text-slate-800">{clip.sentence}</p>
+              <div className="flex items-baseline gap-2">
+                <p className="text-sm font-semibold text-slate-800">{clip.sentence}</p>
+                {clip.wordTranslation && (
+                  <span className="text-xs text-slate-400">{clip.wordTranslation}</span>
+                )}
+              </div>
               {clip.context && (
                 <HighlightedSentence sentence={clip.context} word={clip.sentence} />
               )}

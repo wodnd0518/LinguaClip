@@ -61,9 +61,9 @@ export default function Dashboard() {
     setVideoId(id)
   }
 
-  async function handleSave(word: string, comment: string, context: string, startTime?: number): Promise<void> {
+  async function handleSave(word: string, comment: string, context: string, startTime?: number, wordTranslation?: string): Promise<void> {
     const time = startTime !== undefined ? startTime : getCurrentTime()
-    await saveClip(word, getCurrentVideoId(), time, comment, context)
+    await saveClip(word, getCurrentVideoId(), time, comment, context, wordTranslation)
   }
 
   function handleSeek(clip: Clip) {
@@ -82,6 +82,11 @@ export default function Dashboard() {
       setVideoId(clip.videoId)
       setUrlInput(`https://www.youtube.com/watch?v=${clip.videoId}`)
     }
+  }
+
+  // 쉐도잉: 해당 타임스탬프로 이동 후 영상 재생 (handleSeek와 동일하게 이동)
+  function handleShadow(clip: Clip) {
+    handleSeek(clip) // 이동하면 YouTube가 자동 재생됨
   }
 
   const canSave = IS_EXT ? isOnYouTube : !!videoId
@@ -192,6 +197,7 @@ export default function Dashboard() {
             currentVideoId={getCurrentVideoId()}
             onSeek={handleSeek}
             onDelete={deleteClip}
+            onShadow={IS_EXT ? handleShadow : undefined}
           />
         </div>
       </main>

@@ -2,6 +2,49 @@ import { useRef, useState } from 'react'
 import { useDictionary } from '../hooks/useDictionary'
 import { useTranslation } from '../hooks/useTranslation'
 
+// ── 영어 기능어 목록 (약하게 발음되는 단어들) ───────────────────
+// 이 목록에 없는 단어 = 내용어(content word) → 강세 표시
+const FUNCTION_WORDS = new Set([
+  // 관사
+  'a', 'an', 'the',
+  // 등위접속사
+  'and', 'but', 'or', 'nor', 'for', 'yet', 'so',
+  // 종속접속사
+  'as', 'if', 'than', 'that', 'though', 'although', 'because',
+  'since', 'unless', 'until', 'when', 'where', 'while', 'after',
+  'before', 'whether', 'once', 'whereas',
+  // 전치사
+  'at', 'by', 'from', 'in', 'into', 'of', 'off', 'on', 'onto',
+  'out', 'over', 'to', 'up', 'with', 'about', 'above', 'across',
+  'against', 'along', 'among', 'around', 'behind', 'below',
+  'beneath', 'beside', 'between', 'beyond', 'down', 'during',
+  'except', 'inside', 'near', 'outside', 'per', 'through',
+  'throughout', 'under', 'upon', 'via', 'within', 'without',
+  // 조동사
+  'be', 'am', 'is', 'are', 'was', 'were', 'been', 'being',
+  'have', 'has', 'had', 'having',
+  'do', 'does', 'did',
+  'will', 'would', 'shall', 'should', 'may', 'might', 'must',
+  'can', 'could',
+  // 인칭대명사
+  'i', 'me', 'my', 'mine', 'myself',
+  'you', 'your', 'yours', 'yourself', 'yourselves',
+  'he', 'him', 'his', 'himself',
+  'she', 'her', 'hers', 'herself',
+  'it', 'its', 'itself',
+  'we', 'us', 'our', 'ours', 'ourselves',
+  'they', 'them', 'their', 'theirs', 'themselves',
+  // 지시/관계사
+  'this', 'that', 'these', 'those', 'who', 'whom', 'whose', 'which',
+  // 기타 허사
+  'there', 'here', 'then', 'how',
+])
+
+function isContentWord(word: string): boolean {
+  return !FUNCTION_WORDS.has(word.toLowerCase())
+}
+
+// ── 파트 오브 스피치 색상 ─────────────────────────────────────
 const PART_OF_SPEECH_COLOR: Record<string, string> = {
   noun: 'text-blue-500',
   verb: 'text-green-500',
@@ -22,7 +65,7 @@ function tokenize(text: string) {
 
 interface Props {
   canSave: boolean
-  onSave?: (word: string, comment: string, context: string, startTime: number) => Promise<void>
+  onSave?: (word: string, comment: string, context: string, startTime: number, wordTranslation?: string) => Promise<void>
   onCapture?: () => Promise<{ text: string; startTime: number }>
   onResume?: () => void
 }
@@ -37,7 +80,6 @@ export default function CapturePanel({ canSave, onSave, onCapture, onResume }: P
   const audioRef = useRef<HTMLAudioElement | null>(null)
 
   const { entry, loading: dictLoading, error: dictError, lookup, clear: clearDict } = useDictionary()
-  // 문장 번역 + 단어 번역 — 각각 독립 훅 인스턴스
   const { translation: sentTrans, loading: sentTransLoading, translate: transSent, clear: clearSentTrans } = useTranslation()
   const { translation: wordTrans, translate: transWord, clear: clearWordTrans } = useTranslation()
 
@@ -72,7 +114,7 @@ export default function CapturePanel({ canSave, onSave, onCapture, onResume }: P
     if (!onSave || !selectedWord || !captured) return
     setSaving(true)
     try {
-      await onSave(selectedWord, comment, captured.text, captured.startTime)
+      await onSave(selectedWord, comment, captured.text, captured.startTime, wordTrans ?? undefined)
       setSavedWord(selectedWord)
       setComment('')
       setTimeout(() => setSavedWord(null), 2000)
@@ -106,7 +148,7 @@ export default function CapturePanel({ canSave, onSave, onCapture, onResume }: P
   return (
     <div className="flex flex-col gap-4">
 
-      {/* ── 캡처 버튼 (미캡처 상태) ── */}
+      {/* ── 캡처 버튼 ── */}
       {!captured && (
         <div className="flex flex-col items-center gap-3 rounded-xl border-2 border-dashed border-slate-200 bg-white py-8">
           {onCapture ? (
@@ -141,10 +183,16 @@ export default function CapturePanel({ canSave, onSave, onCapture, onResume }: P
       {/* ── 캡처된 문장 ── */}
       {captured && (
         <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-4">
-          <div className="mb-2 flex items-center justify-between">
-            <p className="text-xs font-semibold uppercase tracking-wider text-indigo-400">
-              캡처된 문장
-            </p>
+          <div className="mb-3 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <p className="text-xs font-semibold uppercase tracking-wider text-indigo-400">캡처된 문장</p>
+              {/* 강세 범례 */}
+              <div className="flex items-center gap-2 text-[10px] text-slate-400">
+                <span className="font-semibold text-slate-700">강조</span>
+                <span className="text-slate-300">/</span>
+                <span>약음</span>
+              </div>
+            </div>
             <button
               onClick={handleResume}
               className="flex items-center gap-1 rounded-lg border border-indigo-200 bg-white px-2.5 py-1 text-xs font-medium text-indigo-600 transition hover:bg-indigo-100"
@@ -156,31 +204,39 @@ export default function CapturePanel({ canSave, onSave, onCapture, onResume }: P
             </button>
           </div>
 
-          {/* 단어 칩 */}
-          <p className="text-sm leading-8 text-slate-800">
-            {tokenize(captured.text).map((token, i) =>
-              token.isWord ? (
+          {/* 단어 칩 — 내용어(강세)와 기능어(약음) 구별 */}
+          <p className="leading-9 text-sm">
+            {tokenize(captured.text).map((token, i) => {
+              if (!token.isWord) {
+                return <span key={i} className="text-slate-400">{token.text}</span>
+              }
+              const isContent = isContentWord(token.text)
+              const isSelected = selectedWord?.toLowerCase() === token.text.toLowerCase()
+              return (
                 <span
                   key={i}
                   onClick={() => handleWordClick(token.text)}
-                  className={`cursor-pointer rounded px-0.5 transition-colors hover:bg-indigo-200 hover:text-indigo-800 ${
-                    selectedWord?.toLowerCase() === token.text.toLowerCase()
+                  className={[
+                    'relative inline-block cursor-pointer rounded px-0.5 transition-colors',
+                    isSelected
                       ? 'bg-indigo-200 font-semibold text-indigo-800'
-                      : ''
-                  }`}
+                      : isContent
+                        ? 'font-semibold text-slate-800 hover:bg-indigo-100'
+                        : 'font-normal text-slate-400 hover:bg-indigo-100 hover:text-slate-600',
+                  ].join(' ')}
                 >
                   {token.text}
+                  {/* 내용어(강세) 표시 — 선택되지 않은 경우에만 점 표시 */}
+                  {isContent && !isSelected && (
+                    <span className="absolute -bottom-0.5 left-1/2 h-1 w-1 -translate-x-1/2 rounded-full bg-amber-400" />
+                  )}
                 </span>
-              ) : (
-                <span key={i} className="text-slate-500">{token.text}</span>
-              ),
-            )}
+              )
+            })}
           </p>
 
           {/* 문장 번역 */}
-          {sentTransLoading && (
-            <p className="mt-2 text-xs text-slate-400">번역 중…</p>
-          )}
+          {sentTransLoading && <p className="mt-2 text-xs text-slate-400">번역 중…</p>}
           {sentTrans && !sentTransLoading && (
             <p className="mt-2 border-t border-indigo-200 pt-2 text-xs leading-relaxed text-indigo-700">
               {sentTrans}
@@ -188,7 +244,9 @@ export default function CapturePanel({ canSave, onSave, onCapture, onResume }: P
           )}
 
           {!selectedWord && (
-            <p className="mt-2 text-xs text-indigo-400">↑ 단어를 클릭해 사전을 확인하세요</p>
+            <p className="mt-2 text-[11px] text-indigo-400">
+              ● 점이 있는 단어가 강조되는 부분 · 단어를 클릭해 사전을 확인하세요
+            </p>
           )}
         </div>
       )}
@@ -196,7 +254,6 @@ export default function CapturePanel({ canSave, onSave, onCapture, onResume }: P
       {/* ── 사전 카드 ── */}
       {selectedWord && (
         <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-
           {dictLoading && (
             <div className="flex items-center gap-2 text-sm text-slate-400">
               <div className="h-4 w-4 animate-spin rounded-full border-2 border-indigo-400 border-t-transparent" />
@@ -271,15 +328,13 @@ export default function CapturePanel({ canSave, onSave, onCapture, onResume }: P
                 ))}
               </div>
 
-              {/* 예문 섹션 */}
+              {/* 예문 */}
               {allExamples.length > 0 && (
                 <div className="rounded-lg bg-indigo-50 px-4 py-3">
                   <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-indigo-400">예문</p>
                   <div className="flex flex-col gap-2">
                     {allExamples.map((ex, i) => (
-                      <p key={i} className="text-sm italic leading-relaxed text-indigo-700">
-                        "{ex}"
-                      </p>
+                      <p key={i} className="text-sm italic leading-relaxed text-indigo-700">"{ex}"</p>
                     ))}
                   </div>
                 </div>
@@ -316,11 +371,7 @@ export default function CapturePanel({ canSave, onSave, onCapture, onResume }: P
                           <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
                           저장 중…
                         </span>
-                      ) : savedWord ? (
-                        '저장됨 ✓'
-                      ) : (
-                        '저장'
-                      )}
+                      ) : savedWord ? '저장됨 ✓' : '저장'}
                     </button>
                   </div>
                 </div>
