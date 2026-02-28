@@ -153,8 +153,15 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       for (let i = pool.length - 2; i >= 0; i--) {
         const text = pool[i].text
         const nextText = pool[i + 1]?.text.trim() ?? ''
-        // 마침표/느낌표/물음표 뒤 다음 항목이 대문자로 시작할 때만 진짜 문장 경계로 인식
-        if (/[.!?]\s*$/.test(text) && /^[A-Z]/.test(nextText)) {
+        // 경계 조건 1: 마침표/느낌표/물음표 뒤 대문자로 시작
+        const isPunctBoundary = /[.!?]\s*$/.test(text) && /^[A-Z]/.test(nextText)
+        // 경계 조건 2: YouTube 자막 리셋 감지
+        // (텍스트가 50% 이상 줄어들고, 이전 텍스트가 새 텍스트를 포함하지 않음)
+        // → 새 문장이 시작되면 YouTube가 자막을 짧게 초기화함
+        const isReset = nextText.length > 0 &&
+          nextText.length < text.length * 0.5 &&
+          !text.toLowerCase().includes(nextText.toLowerCase().slice(0, Math.min(nextText.length, 15)))
+        if (isPunctBoundary || isReset) {
           sentenceStartIdx = i + 1
           break
         }
