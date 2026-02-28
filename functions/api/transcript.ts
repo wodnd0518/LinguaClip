@@ -73,46 +73,76 @@ function buildCookieHeader(headers: Headers): string {
   return [...map.entries()].map(([k, v]) => `${k}=${v}`).join('; ')
 }
 
-async function fetchCaption(
-  baseUrl: string,
-  cookieHeader: string,
-): Promise<{ lines: ReturnType<typeof parseJson3>; format: string } | { error: string }> {
-  const headers = {
-    'User-Agent':
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Accept-Language': 'en-US,en;q=0.9',
-    Cookie: cookieHeader,
-  }
+type FetchResult = { lines: ReturnType<typeof parseJson3>; format: string } | { error: string }
 
-  // baseUrl 그대로 (이미 fmt + 서명 포함)
-  const res = await fetch(baseUrl, { headers })
-  const status = res.status
+async function tryUrl(url: string, cookieHeader: string): Promise<FetchResult> {
+  const res = await fetch(url, {
+    headers: {
+      'User-Agent':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept-Language': 'en-US,en;q=0.9',
+      Cookie: cookieHeader,
+    },
+  })
+  if (!res.ok) return { error: `HTTP ${res.status}` }
+  const text = (await res.text()).trim()
+  if (!text) return { error: `empty` }
 
-  if (!res.ok) return { error: `HTTP ${status}` }
-
-  const text = await res.text()
-  const trimmed = text.trim()
-  if (!trimmed) return { error: `빈 응답 (${status}) — 쿠키 포워딩 후에도 비어있음` }
-
-  if (trimmed.startsWith('{')) {
+  if (text.startsWith('{')) {
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const data: any = JSON.parse(trimmed)
+      const data: any = JSON.parse(text)
       const lines = parseJson3(data.events)
       if (lines.length > 0) return { lines, format: 'json3' }
       return { error: 'json3 이벤트 없음' }
     } catch {
-      return { error: `JSON 파싱 실패: ${trimmed.slice(0, 100)}` }
+      return { error: `JSON 파싱 실패: ${text.slice(0, 100)}` }
     }
   }
 
-  if (trimmed.startsWith('<')) {
-    const lines = parseXml(trimmed)
+  if (text.startsWith('<')) {
+    const lines = parseXml(text)
     if (lines.length > 0) return { lines, format: 'xml' }
-    return { error: `XML 파싱 결과 없음: ${trimmed.slice(0, 300)}` }
+    return { error: `XML 파싱 결과 없음: ${text.slice(0, 300)}` }
   }
 
-  return { error: `알 수 없는 응답: ${trimmed.slice(0, 150)}` }
+  return { error: `알 수 없는 응답: ${text.slice(0, 120)}` }
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function fetchCaption(track: any, videoId: string, cookieHeader: string): Promise<FetchResult> {
+  // 1차: signed baseUrl 그대로
+  const r1 = await tryUrl(track.baseUrl, cookieHeader)
+  if (!('error' in r1) || r1.error !== 'empty') return r1
+
+  // 2차: signed URL에서 핵심 파라미터만 추출 → 서명 없는 timedtext URL 재구성
+  // Cloudflare IP에서는 서명된 URL이 빈 응답을 반환하므로 unsigned URL을 직접 구성
+  try {
+    const parsed = new URL(track.baseUrl)
+    const lang = parsed.searchParams.get('lang') ?? track.languageCode ?? 'en'
+    const name = parsed.searchParams.get('name') ?? track.name?.simpleText ?? ''
+    const kind = parsed.searchParams.get('kind') ?? track.kind ?? ''
+
+    const base = new URL('https://www.youtube.com/api/timedtext')
+    base.searchParams.set('v', videoId)
+    base.searchParams.set('lang', lang)
+    if (name) base.searchParams.set('name', name)
+    if (kind) base.searchParams.set('kind', kind)
+
+    // json3 시도
+    base.searchParams.set('fmt', 'json3')
+    const r2 = await tryUrl(base.toString(), cookieHeader)
+    if (!('error' in r2)) return r2
+
+    // srv1 XML 시도 (fmt 없이)
+    base.searchParams.delete('fmt')
+    const r3 = await tryUrl(base.toString(), cookieHeader)
+    if (!('error' in r3)) return r3
+
+    return { error: `서명없는 URL도 실패 — json3: ${(r2 as { error: string }).error} / srv1: ${(r3 as { error: string }).error}` }
+  } catch (e) {
+    return { error: `URL 파싱 오류: ${e}` }
+  }
 }
 
 export async function onRequestGet({ request }: { request: Request }) {
@@ -163,7 +193,7 @@ export async function onRequestGet({ request }: { request: Request }) {
       return Response.json({ lines: [], languages: [], error: '자막 트랙을 찾을 수 없어요.' })
     }
 
-    const result = await fetchCaption(track.baseUrl, cookieHeader)
+    const result = await fetchCaption(track, videoId, cookieHeader)
     if ('error' in result) {
       return Response.json({ lines: [], languages: [], error: result.error }, { status: 502 })
     }
