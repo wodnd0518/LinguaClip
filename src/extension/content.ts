@@ -101,16 +101,20 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       return true
     }
 
-    // 마지막 문장 끝(. ! ?) 이후부터 현재까지를 하나의 문장으로 조합
+    // 현재 시점 기준 앞 4초 이내 항목만 사용 (과거 누적 방지)
+    const recent = subtitleHistory.filter((e) => e.time >= currentTime - 4)
+    const pool = recent.length > 0 ? recent : subtitleHistory.slice(-3)
+
+    // pool 안에서 마지막 문장 끝(. ! ?) 이후부터 조합
     let sentenceStartIdx = 0
-    for (let i = subtitleHistory.length - 2; i >= 0; i--) {
-      if (/[.!?]\s*$/.test(subtitleHistory[i].text)) {
+    for (let i = pool.length - 2; i >= 0; i--) {
+      if (/[.!?]\s*$/.test(pool[i].text)) {
         sentenceStartIdx = i + 1
         break
       }
     }
 
-    const entries = subtitleHistory.slice(sentenceStartIdx)
+    const entries = pool.slice(sentenceStartIdx)
     const fullText = entries
       .map((e) => e.text)
       .join(' ')
