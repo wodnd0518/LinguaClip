@@ -12,10 +12,20 @@ const YT_HEADERS = {
   Referer: 'https://www.youtube.com/',
 }
 
-// proto 직렬화: field 1 (string) = videoId
+// InnerTube API 키 (YouTube 페이지에 하드코딩된 공개 키)
+const INNERTUBE_KEY = 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8'
+
+// proto 직렬화:
+//   field 1 (string) = videoId
+//   field 2 (string) = "" (required)
+//   field 5 (string) = "" (required)
 function buildParams(videoId: string): string {
   const bytes = new TextEncoder().encode(videoId)
-  const proto = new Uint8Array([0x0a, bytes.length, ...bytes])
+  const proto = new Uint8Array([
+    0x0a, bytes.length, ...bytes, // field 1: videoId
+    0x12, 0x00,                   // field 2: ""
+    0x2a, 0x00,                   // field 5: ""
+  ])
   let bin = ''
   proto.forEach((b) => (bin += String.fromCharCode(b)))
   return btoa(bin)
@@ -60,7 +70,7 @@ export async function onRequestGet({ request }: { request: Request }) {
   try {
     const params = buildParams(videoId)
 
-    const res = await fetch('https://www.youtube.com/youtubei/v1/get_transcript', {
+    const res = await fetch(`https://www.youtube.com/youtubei/v1/get_transcript?key=${INNERTUBE_KEY}`, {
       method: 'POST',
       headers: YT_HEADERS,
       body: JSON.stringify({
