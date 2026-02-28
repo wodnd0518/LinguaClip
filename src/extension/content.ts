@@ -154,7 +154,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       }
       const entries = pool.slice(sentenceStartIdx)
       const merged = mergeSubtitleChunks(entries.map((e) => e.text))
-      const startTime = entries[0]?.time ?? captureTime
+      // 자막 표시는 실제 발화보다 0.8초 늦게 나타남 → 앞당겨 보정
+      const startTime = Math.max(0, (entries[0]?.time ?? captureTime) - 0.8)
 
       subtitleHistory.length = 0
       lastCaptionText = ''

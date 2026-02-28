@@ -1,18 +1,29 @@
 import { useState } from 'react'
 import type { Clip } from '../hooks/useClips'
 
-// 현재 시간 기준으로 어떤 단어가 발화 중인지 추정 (문자 수 비례 분배)
+// 영어 단어의 음절 수 추정 (문자 수보다 발화 시간에 더 비례)
+function countSyllables(word: string): number {
+  const w = word.toLowerCase().replace(/[^a-z]/g, '')
+  if (w.length === 0) return 1
+  if (w.length <= 3) return 1
+  const vowelGroups = w.match(/[aeiouy]+/g) ?? []
+  let count = vowelGroups.length
+  if (w.endsWith('e') && w.length > 2) count--
+  return Math.max(1, count)
+}
+
+// 현재 시간 기준으로 어떤 단어가 발화 중인지 추정 (음절 수 비례 분배)
 function getActiveWordIndex(words: string[], startTime: number, endTime: number, currentTime: number): number {
   if (endTime <= startTime || currentTime < startTime) return -1
   if (currentTime >= endTime) return words.length - 1
-  const totalChars = words.reduce((sum, w) => sum + w.length, 0)
-  if (totalChars === 0) return -1
+  const totalWeight = words.reduce((sum, w) => sum + countSyllables(w), 0)
+  if (totalWeight === 0) return -1
   const progress = (currentTime - startTime) / (endTime - startTime)
-  const targetChars = progress * totalChars
-  let charCount = 0
+  const targetWeight = progress * totalWeight
+  let weightCount = 0
   for (let i = 0; i < words.length; i++) {
-    charCount += words[i].length
-    if (charCount >= targetChars) return i
+    weightCount += countSyllables(words[i])
+    if (weightCount >= targetWeight) return i
   }
   return words.length - 1
 }

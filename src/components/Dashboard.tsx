@@ -44,6 +44,9 @@ export default function Dashboard() {
   const rafRef = useRef<number | null>(null)
   // RAF 기준점: [videoTime, wallTime]
   const timeAnchorRef = useRef<[number, number]>([0, 0])
+  // stale closure 방지용 ref (RAF tick 내에서 최신 shadowingClip 참조)
+  const shadowingClipRef = useRef<Clip | null>(null)
+  useEffect(() => { shadowingClipRef.current = shadowingClip }, [shadowingClip])
 
   // videoInfo.currentTime 업데이트 시 앵커 갱신
   useEffect(() => {
@@ -61,7 +64,15 @@ export default function Dashboard() {
     function tick() {
       const [anchorVt, anchorWt] = timeAnchorRef.current
       const elapsed = (performance.now() - anchorWt) / 1000
-      setSmoothCurrentTime(anchorVt + elapsed)
+      let t = anchorVt + elapsed
+      // 구간을 넘어서 over-extrapolate 하지 않도록 to에서 클램프
+      // → 루프백이 일어나기 전까지 마지막 단어에서 멈춤
+      const sc = shadowingClipRef.current
+      if (sc) {
+        const to = sc.endTime ?? sc.timestamp + 7
+        if (t > to) t = to
+      }
+      setSmoothCurrentTime(t)
       rafRef.current = requestAnimationFrame(tick)
     }
     rafRef.current = requestAnimationFrame(tick)
