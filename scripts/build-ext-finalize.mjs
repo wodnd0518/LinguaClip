@@ -6,7 +6,7 @@
  */
 
 import { build } from 'esbuild'
-import { copyFileSync, mkdirSync, writeFileSync } from 'fs'
+import { copyFileSync, mkdirSync, rmSync, writeFileSync } from 'fs'
 import { deflateSync } from 'zlib'
 
 // ── PNG 생성 ──────────────────────────────────────────────
@@ -61,6 +61,11 @@ function createPNG(size, r, g, b) {
 
 // ── 실행 ─────────────────────────────────────────────────
 mkdirSync('dist-ext/icons', { recursive: true })
+
+// Chrome 확장 프로그램에서 _ 시작 파일명 금지 → 제거
+for (const f of ['_redirects', 'vite.svg']) {
+  rmSync(`dist-ext/${f}`, { force: true })
+}
 
 // 아이콘 생성 (인디고 #6366f1 = RGB 99,102,241)
 for (const size of [16, 48, 128]) {
