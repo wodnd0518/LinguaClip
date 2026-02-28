@@ -75,12 +75,12 @@ export function useYouTubeTab() {
     })
   }, [])
 
-  const captureSubtitle = useCallback((): Promise<{ text: string; startTime: number }> => {
+  const captureSubtitle = useCallback((): Promise<{ text: string; startTime: number; endTime: number }> => {
     return new Promise((resolve) => {
-      if (!IS_EXT || !tabIdRef.current) return resolve({ text: '', startTime: 0 })
+      if (!IS_EXT || !tabIdRef.current) return resolve({ text: '', startTime: 0, endTime: 0 })
       chrome.tabs.sendMessage(tabIdRef.current, { type: 'YT_CAPTURE_SENTENCE' }, (response) => {
-        if (chrome.runtime.lastError) return resolve({ text: '', startTime: 0 })
-        resolve(response ?? { text: '', startTime: 0 })
+        if (chrome.runtime.lastError) return resolve({ text: '', startTime: 0, endTime: 0 })
+        resolve(response ?? { text: '', startTime: 0, endTime: 0 })
       })
     })
   }, [])
@@ -92,13 +92,21 @@ export function useYouTubeTab() {
     })
   }, [])
 
-  // 쉐도잉: from 시점부터 duration초간 재생 후 자동 정지
-  const playShadow = useCallback((from: number, duration = 7) => {
+  // 쉐도잉: from ~ to 구간 무한 반복
+  const startShadow = useCallback((from: number, to: number) => {
     if (!IS_EXT || !tabIdRef.current) return
-    chrome.tabs.sendMessage(tabIdRef.current, { type: 'YT_PLAY_SEGMENT', from, duration }, () => {
+    chrome.tabs.sendMessage(tabIdRef.current, { type: 'YT_START_SHADOW', from, to }, () => {
       if (chrome.runtime.lastError) { /* ignore */ }
     })
   }, [])
 
-  return { videoInfo, isOnYouTube, seekTo, navigateTab, getSubtitle, captureSubtitle, resumeVideo, playShadow }
+  // 쉐도잉 정지
+  const stopShadow = useCallback(() => {
+    if (!IS_EXT || !tabIdRef.current) return
+    chrome.tabs.sendMessage(tabIdRef.current, { type: 'YT_STOP_SHADOW' }, () => {
+      if (chrome.runtime.lastError) { /* ignore */ }
+    })
+  }, [])
+
+  return { videoInfo, isOnYouTube, seekTo, navigateTab, getSubtitle, captureSubtitle, resumeVideo, startShadow, stopShadow }
 }

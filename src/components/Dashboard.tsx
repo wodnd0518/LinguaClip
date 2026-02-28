@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { IS_EXT } from '../lib/env'
 import { useYouTubeTab } from '../hooks/useYouTubeTab'
@@ -28,7 +28,7 @@ export default function Dashboard() {
   const { user, signOutUser } = useAuth()
 
   // 확장 프로그램: YouTube 탭 연동
-  const { videoInfo, isOnYouTube, seekTo: ytSeekTo, navigateTab, captureSubtitle, resumeVideo, playShadow } = useYouTubeTab()
+  const { videoInfo, isOnYouTube, seekTo: ytSeekTo, navigateTab, captureSubtitle, resumeVideo, startShadow, stopShadow } = useYouTubeTab()
 
   // 웹 전용: URL 입력 + IFrame 플레이어
   const [urlInput, setUrlInput] = useState('')
@@ -37,6 +37,36 @@ export default function Dashboard() {
   const playerRef = useRef<YouTubePlayerHandle>(null)
 
   const { clips, loading: clipsLoading, saveClip, deleteClip } = useClips(user!.uid)
+
+  // 쉐도잉 상태
+  const [shadowingClip, setShadowingClip] = useState<Clip | null>(null)
+  const [smoothCurrentTime, setSmoothCurrentTime] = useState(0)
+  const rafRef = useRef<number | null>(null)
+  // RAF 기준점: [videoTime, wallTime]
+  const timeAnchorRef = useRef<[number, number]>([0, 0])
+
+  // videoInfo.currentTime 업데이트 시 앵커 갱신
+  useEffect(() => {
+    if (videoInfo && !videoInfo.paused) {
+      timeAnchorRef.current = [videoInfo.currentTime, performance.now()]
+    }
+  }, [videoInfo])
+
+  // RAF 루프: 쉐도잉 중일 때만 smoothCurrentTime 업데이트
+  useEffect(() => {
+    if (!shadowingClip) {
+      if (rafRef.current) { cancelAnimationFrame(rafRef.current); rafRef.current = null }
+      return
+    }
+    function tick() {
+      const [anchorVt, anchorWt] = timeAnchorRef.current
+      const elapsed = (performance.now() - anchorWt) / 1000
+      setSmoothCurrentTime(anchorVt + elapsed)
+      rafRef.current = requestAnimationFrame(tick)
+    }
+    rafRef.current = requestAnimationFrame(tick)
+    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current) }
+  }, [shadowingClip])
 
   // 현재 재생 위치 반환 — 모드에 따라 소스가 다름
   function getCurrentTime(): number {
@@ -61,9 +91,9 @@ export default function Dashboard() {
     setVideoId(id)
   }
 
-  async function handleSave(word: string, comment: string, context: string, startTime?: number, wordTranslation?: string): Promise<void> {
+  async function handleSave(word: string, comment: string, context: string, startTime?: number, wordTranslation?: string, endTime?: number): Promise<void> {
     const time = startTime !== undefined ? startTime : getCurrentTime()
-    await saveClip(word, getCurrentVideoId(), time, comment, context, wordTranslation)
+    await saveClip(word, getCurrentVideoId(), time, comment, context, wordTranslation, endTime)
   }
 
   function handleSeek(clip: Clip) {
@@ -84,11 +114,21 @@ export default function Dashboard() {
     }
   }
 
-  // 쉐도잉: 해당 구간만 재생 후 자동 정지 (같은 영상) / 다른 영상이면 이동
+  // 쉐도잉: 해당 구간 무한 반복
   function handleShadow(clip: Clip) {
+    // 이미 같은 클립 쉐도잉 중이면 정지
+    if (shadowingClip?.id === clip.id) {
+      setShadowingClip(null)
+      if (IS_EXT) stopShadow()
+      return
+    }
     if (IS_EXT) {
       if (clip.videoId === videoInfo?.videoId) {
-        playShadow(clip.timestamp, 7) // 7초간 재생 후 정지
+        const from = clip.timestamp
+        const to = clip.endTime ?? clip.timestamp + 7
+        startShadow(from, to)
+        setShadowingClip(clip)
+        timeAnchorRef.current = [from, performance.now()]
       } else {
         navigateTab(clip.videoId, clip.timestamp)
       }
@@ -211,6 +251,8 @@ export default function Dashboard() {
             onSeek={handleSeek}
             onDelete={deleteClip}
             onShadow={IS_EXT ? handleShadow : undefined}
+            shadowingClip={shadowingClip}
+            smoothCurrentTime={smoothCurrentTime}
           />
         </div>
       </main>

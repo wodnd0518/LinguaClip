@@ -65,13 +65,13 @@ function tokenize(text: string) {
 
 interface Props {
   canSave: boolean
-  onSave?: (word: string, comment: string, context: string, startTime: number, wordTranslation?: string) => Promise<void>
-  onCapture?: () => Promise<{ text: string; startTime: number }>
+  onSave?: (word: string, comment: string, context: string, startTime: number, wordTranslation?: string, endTime?: number) => Promise<void>
+  onCapture?: () => Promise<{ text: string; startTime: number; endTime: number }>
   onResume?: () => void
 }
 
 export default function CapturePanel({ canSave, onSave, onCapture, onResume }: Props) {
-  const [captured, setCaptured] = useState<{ text: string; startTime: number } | null>(null)
+  const [captured, setCaptured] = useState<{ text: string; startTime: number; endTime: number } | null>(null)
   const [capturing, setCapturing] = useState(false)
   const [selectedWord, setSelectedWord] = useState<string | null>(null)
   const [comment, setComment] = useState('')
@@ -114,7 +114,7 @@ export default function CapturePanel({ canSave, onSave, onCapture, onResume }: P
     if (!onSave || !selectedWord || !captured) return
     setSaving(true)
     try {
-      await onSave(selectedWord, comment, captured.text, captured.startTime, wordTrans ?? undefined)
+      await onSave(selectedWord, comment, captured.text, captured.startTime, wordTrans ?? undefined, captured.endTime)
       setSavedWord(selectedWord)
       setComment('')
       setTimeout(() => setSavedWord(null), 2000)

@@ -21,6 +21,7 @@ export interface Clip {
   sentence: string
   videoId: string
   timestamp: number // seconds
+  endTime?: number  // seconds — 문장 끝 타임스탬프 (쉐도잉 루프용)
   comment?: string
   context?: string       // YouTube 자막 문장 (저장 시점)
   wordTranslation?: string  // 저장된 단어의 한국어 뜻
@@ -62,7 +63,7 @@ export function useClips(userId: string) {
     return unsub
   }, [userId, storageKey])
 
-  async function saveClip(sentence: string, videoId: string, timestamp: number, comment?: string, context?: string, wordTranslation?: string): Promise<void> {
+  async function saveClip(sentence: string, videoId: string, timestamp: number, comment?: string, context?: string, wordTranslation?: string, endTime?: number): Promise<void> {
     if (IS_EXT) {
       const newClip: Clip = {
         id: crypto.randomUUID(),
@@ -70,6 +71,7 @@ export function useClips(userId: string) {
         sentence,
         videoId,
         timestamp,
+        endTime,
         comment,
         context,
         wordTranslation,
@@ -88,6 +90,7 @@ export function useClips(userId: string) {
         sentence,
         videoId,
         timestamp,
+        endTime,
         comment,
         context,
         wordTranslation,
@@ -102,6 +105,7 @@ export function useClips(userId: string) {
       sentence,
       videoId,
       timestamp,
+      ...(endTime !== undefined ? { endTime } : {}),
       ...(comment ? { comment } : {}),
       ...(context ? { context } : {}),
       ...(wordTranslation ? { wordTranslation } : {}),
