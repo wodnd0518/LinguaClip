@@ -4,7 +4,7 @@
   "description": "YouTube 영상으로 배우는 나만의 영어 사전",
   "version": "1.0.0",
   "permissions": ["sidePanel", "tabs", "storage", "scripting"],
-  "host_permissions": ["*://www.youtube.com/*", "https://api.anthropic.com/*"],
+  "host_permissions": ["*://www.youtube.com/*", "https://api.anthropic.com/*", "https://api.openai.com/*"],
   "background": {
     "service_worker": "background.js",
     "type": "module"

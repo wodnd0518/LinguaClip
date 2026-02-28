@@ -2,7 +2,7 @@ import { useRef, useState } from 'react'
 import { useDictionary } from '../hooks/useDictionary'
 import { useTranslation } from '../hooks/useTranslation'
 import { useAIAnalysis } from '../hooks/useAIAnalysis'
-import { useAPIKey } from '../hooks/useAPIKey'
+import { useAPIKey, PROVIDER_LABELS, PROVIDER_KEY_PREFIX, type AIProvider } from '../hooks/useAPIKey'
 
 // ── 영어 기능어 목록 (약하게 발음되는 단어들) ───────────────────
 // 이 목록에 없는 단어 = 내용어(content word) → 강세 표시
@@ -140,14 +140,15 @@ export default function CapturePanel({ canSave, onSave, onCapture, onResume }: P
   const [savedWord, setSavedWord] = useState<string | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
 
-  const { apiKey, loading: keyLoading, saveKey } = useAPIKey()
+  const { provider, setProvider, activeKey, saveKey } = useAPIKey()
   const [keyInput, setKeyInput] = useState('')
   const [showKeyInput, setShowKeyInput] = useState(false)
+  const [keyLoading] = useState(false)
 
   const { entry, loading: dictLoading, error: dictError, lookup, clear: clearDict } = useDictionary()
   const { translation: sentTrans, loading: sentTransLoading, translate: transSent, clear: clearSentTrans } = useTranslation()
   const { translation: wordTrans, translate: transWord, clear: clearWordTrans } = useTranslation()
-  const { analysis: aiAnalysis, loading: aiLoading, error: aiError, analyze, clear: clearAI } = useAIAnalysis(apiKey)
+  const { analysis: aiAnalysis, loading: aiLoading, error: aiError, analyze, clear: clearAI } = useAIAnalysis(provider, activeKey)
 
   async function handleCapture() {
     if (!onCapture) return
@@ -454,18 +455,34 @@ export default function CapturePanel({ canSave, onSave, onCapture, onResume }: P
       {/* ── AI 분석 카드 ── */}
       {selectedWord && captured && !keyLoading && (
         <div className="rounded-xl border border-violet-200 bg-violet-50 p-4">
+
+          {/* 헤더: 제목 + provider 탭 + 분석하기 버튼 */}
           <div className="mb-3 flex items-center justify-between">
             <span className="text-xs font-semibold uppercase tracking-wider text-violet-500">AI 분석</span>
             <div className="flex items-center gap-2">
-              {apiKey && !showKeyInput && (
-                <button
-                  onClick={() => setShowKeyInput(true)}
-                  className="text-[10px] text-violet-300 transition hover:text-violet-500"
-                >
+              {/* Provider 탭 */}
+              <div className="flex rounded-lg border border-violet-200 bg-white p-0.5">
+                {(Object.keys(PROVIDER_LABELS) as AIProvider[]).map((p) => (
+                  <button
+                    key={p}
+                    onClick={() => { setProvider(p); clearAI(); setShowKeyInput(false); setKeyInput('') }}
+                    className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
+                      provider === p
+                        ? 'bg-violet-500 text-white'
+                        : 'text-violet-400 hover:text-violet-600'
+                    }`}
+                  >
+                    {PROVIDER_LABELS[p]}
+                  </button>
+                ))}
+              </div>
+              {/* 키 변경 / 분석하기 */}
+              {activeKey && !showKeyInput && (
+                <button onClick={() => setShowKeyInput(true)} className="text-[10px] text-violet-300 hover:text-violet-500">
                   키 변경
                 </button>
               )}
-              {apiKey && !aiAnalysis && !aiLoading && !showKeyInput && (
+              {activeKey && !aiAnalysis && !aiLoading && !showKeyInput && (
                 <button
                   onClick={() => analyze(captured.text, selectedWord, wordTrans ?? undefined)}
                   className="flex items-center gap-1 rounded-md bg-violet-500 px-2.5 py-1 text-xs font-medium text-white transition hover:bg-violet-600"
@@ -480,10 +497,12 @@ export default function CapturePanel({ canSave, onSave, onCapture, onResume }: P
           </div>
 
           {/* API 키 미설정 또는 키 변경 모드 */}
-          {(!apiKey || showKeyInput) && (
+          {(!activeKey || showKeyInput) && (
             <div className="flex flex-col gap-2">
               <p className="text-xs text-violet-600">
-                {apiKey ? 'Anthropic API 키를 변경합니다.' : 'Anthropic API 키를 입력하면 AI 분석이 활성화됩니다.'}
+                {activeKey
+                  ? `${PROVIDER_LABELS[provider]} API 키를 변경합니다.`
+                  : `${PROVIDER_LABELS[provider]} API 키를 입력하면 AI 분석이 활성화됩니다.`}
               </p>
               <div className="flex gap-2">
                 <input
@@ -491,42 +510,42 @@ export default function CapturePanel({ canSave, onSave, onCapture, onResume }: P
                   value={keyInput}
                   onChange={(e) => setKeyInput(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter' && keyInput.startsWith('sk-ant')) {
-                      saveKey(keyInput); setKeyInput(''); setShowKeyInput(false)
+                    if (e.key === 'Enter' && keyInput.startsWith(PROVIDER_KEY_PREFIX[provider])) {
+                      saveKey(provider, keyInput); setKeyInput(''); setShowKeyInput(false)
                     }
                   }}
-                  placeholder="sk-ant-api03-..."
+                  placeholder={provider === 'anthropic' ? 'sk-ant-api03-...' : 'sk-...'}
                   className="flex-1 rounded-lg border border-violet-200 bg-white px-3 py-1.5 text-xs outline-none transition focus:border-violet-400 focus:ring-1 focus:ring-violet-200"
                 />
                 <button
-                  onClick={() => { saveKey(keyInput); setKeyInput(''); setShowKeyInput(false) }}
-                  disabled={!keyInput.startsWith('sk-ant')}
+                  onClick={() => { saveKey(provider, keyInput); setKeyInput(''); setShowKeyInput(false) }}
+                  disabled={!keyInput.startsWith(PROVIDER_KEY_PREFIX[provider])}
                   className="rounded-lg bg-violet-500 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-violet-600 disabled:opacity-40"
                 >
                   저장
                 </button>
-                {apiKey && showKeyInput && (
+                {activeKey && showKeyInput && (
                   <button
                     onClick={() => { setShowKeyInput(false); setKeyInput('') }}
-                    className="rounded-lg border border-violet-200 px-2 py-1.5 text-xs text-violet-500 transition hover:bg-violet-100"
+                    className="rounded-lg border border-violet-200 px-2 py-1.5 text-xs text-violet-500 hover:bg-violet-100"
                   >
                     취소
                   </button>
                 )}
               </div>
               <p className="text-[10px] text-violet-400">
-                console.anthropic.com에서 발급 · 기기에만 저장되며 외부로 전송되지 않습니다
+                {provider === 'anthropic' ? 'console.anthropic.com' : 'platform.openai.com'}에서 발급 · 기기에만 저장
               </p>
             </div>
           )}
 
           {/* 분석 결과 */}
-          {apiKey && !showKeyInput && (
+          {activeKey && !showKeyInput && (
             <>
               {aiLoading && (
                 <div className="flex items-center gap-2 text-xs text-violet-400">
                   <div className="h-3 w-3 animate-spin rounded-full border-2 border-violet-400 border-t-transparent" />
-                  Claude가 분석 중…
+                  {PROVIDER_LABELS[provider]}가 분석 중…
                 </div>
               )}
               {aiError && aiError !== 'no_key' && !aiLoading && (
