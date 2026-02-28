@@ -22,72 +22,97 @@ function parseJson3(events: CaptionSegment[]) {
     .filter((l) => l.text)
 }
 
-function parseSrv3(xml: string) {
-  const lines: { start: number; dur: number; text: string }[] = []
-  // <p t="시작ms" d="지속ms" ...>텍스트</p> 패턴
-  const re = /<p[^>]+\bt="(\d+)"[^>]+\bd="(\d+)"[^>]*>([\s\S]*?)<\/p>/g
-  let m: RegExpExecArray | null
-  while ((m = re.exec(xml)) !== null) {
-    // HTML 태그 및 엔티티 제거
-    const text = m[3]
-      .replace(/<[^>]+>/g, '')
-      .replace(/&amp;/g, '&')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&quot;/g, '"')
-      .replace(/&#39;/g, "'")
-      .replace(/\n/g, ' ')
-      .trim()
-    if (text) lines.push({ start: Number(m[1]) / 1000, dur: Number(m[2]) / 1000, text })
-  }
-  return lines
+function cleanXmlText(s: string) {
+  return s
+    .replace(/<[^>]+>/g, '')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\n/g, ' ')
+    .trim()
 }
 
-async function fetchCaption(baseUrl: string): Promise<{ lines: ReturnType<typeof parseJson3>; format: string } | { error: string }> {
-  const headers = {
-    'User-Agent':
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Accept-Language': 'en-US,en;q=0.9',
-  }
+// srv1 포맷: <text start="1.23" dur="2.34">...</text>  (초 단위)
+// srv3 포맷: <p t="1230" d="2340">...</p>              (밀리초 단위)
+function parseXml(xml: string): { start: number; dur: number; text: string }[] {
+  let m: RegExpExecArray | null
 
-  // 1차 시도: json3 포맷
-  const json3Res = await fetch(`${baseUrl}&fmt=json3`, { headers })
-  if (json3Res.ok) {
-    const text = await json3Res.text()
-    const trimmed = text.trim()
-    if (trimmed) {
-      if (trimmed.startsWith('{')) {
-        // JSON 응답
-        try {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const data: any = JSON.parse(trimmed)
-          return { lines: parseJson3(data.events), format: 'json3' }
-        } catch {
-          // JSON 파싱 실패 → XML fallback
-        }
-      } else if (trimmed.startsWith('<')) {
-        // YouTube가 XML로 응답한 경우 (자동 생성 자막 등)
-        const lines = parseSrv3(trimmed)
-        if (lines.length > 0) return { lines, format: 'json3-xml' }
-        // 파싱 실패 시 실제 XML 앞부분 반환 (디버그)
-        return { error: `XML 파싱 실패 (json3): ${trimmed.slice(0, 400)}` }
-      }
+  // srv1 시도
+  const srv1 = /<text[^>]*\bstart="([\d.]+)"[^>]*\bdur="([\d.]+)"[^>]*>([\s\S]*?)<\/text>/g
+  const srv1Lines: { start: number; dur: number; text: string }[] = []
+  while ((m = srv1.exec(xml)) !== null) {
+    const text = cleanXmlText(m[3])
+    if (text) srv1Lines.push({ start: Number(m[1]), dur: Number(m[2]), text })
+  }
+  if (srv1Lines.length > 0) return srv1Lines
+
+  // srv3 시도 — t/d 속성 순서 무관
+  const srv3 = /<p\b([^>]*)>([\s\S]*?)<\/p>/g
+  const srv3Lines: { start: number; dur: number; text: string }[] = []
+  while ((m = srv3.exec(xml)) !== null) {
+    const attrs = m[1]
+    const tMatch = /\bt="(\d+)"/.exec(attrs)
+    const dMatch = /\bd="(\d+)"/.exec(attrs)
+    if (!tMatch || !dMatch) continue
+    const text = cleanXmlText(m[2])
+    if (text) srv3Lines.push({ start: Number(tMatch[1]) / 1000, dur: Number(dMatch[1]) / 1000, text })
+  }
+  return srv3Lines
+}
+
+const CAPTION_HEADERS = {
+  'User-Agent':
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  'Accept-Language': 'en-US,en;q=0.9',
+}
+
+type CaptionResult = { lines: ReturnType<typeof parseJson3>; format: string } | { error: string }
+
+async function tryFetch(url: string): Promise<CaptionResult> {
+  const res = await fetch(url, { headers: CAPTION_HEADERS })
+  if (!res.ok) return { error: `HTTP ${res.status}` }
+
+  const text = await res.text()
+  const trimmed = text.trim()
+  if (!trimmed) return { error: 'empty' }
+
+  if (trimmed.startsWith('{')) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const data: any = JSON.parse(trimmed)
+      const lines = parseJson3(data.events)
+      if (lines.length > 0) return { lines, format: 'json3' }
+      return { error: `json3 이벤트 없음` }
+    } catch {
+      return { error: `JSON 파싱 실패: ${trimmed.slice(0, 100)}` }
     }
   }
 
-  // 2차 시도: srv3 XML 포맷
-  const srv3Res = await fetch(`${baseUrl}&fmt=srv3`, { headers })
-  if (srv3Res.ok) {
-    const xml = await srv3Res.text()
-    if (xml.trim()) {
-      const lines = parseSrv3(xml.trim())
-      if (lines.length > 0) return { lines, format: 'srv3' }
-      // XML은 왔지만 파싱된 줄이 없는 경우 — 처음 300자를 디버그로 반환
-      return { error: `XML 파싱 결과 없음: ${xml.slice(0, 300)}` }
-    }
+  if (trimmed.startsWith('<')) {
+    const lines = parseXml(trimmed)
+    if (lines.length > 0) return { lines, format: 'xml' }
+    return { error: `XML 파싱 결과 없음: ${trimmed.slice(0, 300)}` }
   }
 
-  return { error: '자막 데이터를 불러올 수 없어요. (json3/srv3 모두 실패)' }
+  return { error: `알 수 없는 응답: ${trimmed.slice(0, 100)}` }
+}
+
+async function fetchCaption(baseUrl: string): Promise<CaptionResult> {
+  // 1차: baseUrl 그대로 (이미 fmt + 서명 포함)
+  const r1 = await tryFetch(baseUrl)
+  if (!('error' in r1)) return r1
+
+  // 2차: baseUrl에 fmt=json3 명시 (fmt 없는 URL용)
+  const r2 = await tryFetch(`${baseUrl}&fmt=json3`)
+  if (!('error' in r2)) return r2
+
+  // 3차: srv1 XML 시도
+  const r3 = await tryFetch(`${baseUrl}&fmt=srv1`)
+  if (!('error' in r3)) return r3
+
+  return { error: `자막 URL 접근 실패 — 1차: ${r1.error} / 2차: ${r2.error} / 3차: ${r3.error}` }
 }
 
 export async function onRequestGet({ request }: { request: Request }) {
@@ -110,7 +135,10 @@ export async function onRequestGet({ request }: { request: Request }) {
     })
 
     if (!pageRes.ok) {
-      return Response.json({ lines: [], languages: [], error: `영상 페이지를 불러올 수 없어요. (${pageRes.status})` }, { status: 502 })
+      return Response.json(
+        { lines: [], languages: [], error: `영상 페이지를 불러올 수 없어요. (${pageRes.status})` },
+        { status: 502 },
+      )
     }
 
     const html = await pageRes.text()
