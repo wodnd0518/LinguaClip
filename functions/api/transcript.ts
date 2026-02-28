@@ -43,7 +43,7 @@ function parseSrv3(xml: string) {
   return lines
 }
 
-async function fetchCaption(baseUrl: string) {
+async function fetchCaption(baseUrl: string): Promise<{ lines: ReturnType<typeof parseJson3>; format: string } | { error: string }> {
   const headers = {
     'User-Agent':
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -52,6 +52,7 @@ async function fetchCaption(baseUrl: string) {
 
   // 1차 시도: json3 포맷
   const json3Res = await fetch(`${baseUrl}&fmt=json3`, { headers })
+  const json3Status = json3Res.status
   if (json3Res.ok) {
     const text = await json3Res.text()
     if (text.trim() && !text.trim().startsWith('<')) {
@@ -59,18 +60,25 @@ async function fetchCaption(baseUrl: string) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const data: any = JSON.parse(text)
         return { lines: parseJson3(data.events), format: 'json3' }
-      } catch {
+      } catch (e) {
         // json3 파싱 실패 → srv3 fallback
+        console.error('json3 parse failed:', e, text.slice(0, 100))
       }
     }
   }
 
   // 2차 시도: srv3 XML 포맷
   const srv3Res = await fetch(`${baseUrl}&fmt=srv3`, { headers })
-  if (!srv3Res.ok) return null
-  const xml = await srv3Res.text()
-  if (!xml.trim()) return null
-  return { lines: parseSrv3(xml), format: 'srv3' }
+  const srv3Status = srv3Res.status
+  if (srv3Res.ok) {
+    const xml = await srv3Res.text()
+    if (xml.trim()) {
+      return { lines: parseSrv3(xml), format: 'srv3' }
+    }
+    return { error: `srv3 응답이 비어있어요. (json3: ${json3Status}, srv3: ${srv3Status})` }
+  }
+
+  return { error: `자막 URL 접근 실패 — json3: ${json3Status}, srv3: ${srv3Status}` }
 }
 
 export async function onRequestGet({ request }: { request: Request }) {
@@ -117,8 +125,8 @@ export async function onRequestGet({ request }: { request: Request }) {
     }
 
     const result = await fetchCaption(track.baseUrl)
-    if (!result) {
-      return Response.json({ lines: [], languages: [], error: '자막 데이터를 불러올 수 없어요.' }, { status: 502 })
+    if ('error' in result) {
+      return Response.json({ lines: [], languages: [], error: result.error }, { status: 502 })
     }
 
     return Response.json(
