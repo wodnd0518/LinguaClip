@@ -41,6 +41,7 @@ const FUNCTION_WORDS = new Set([
 ])
 
 function isContentWord(word: string): boolean {
+  if (word.includes(' ')) return true  // 다단어 표현은 항상 강세
   return !FUNCTION_WORDS.has(word.toLowerCase())
 }
 
@@ -56,11 +57,69 @@ const PART_OF_SPEECH_COLOR: Record<string, string> = {
   interjection: 'text-yellow-500',
 }
 
-function tokenize(text: string) {
-  return text
-    .split(/([A-Za-z][A-Za-z']*[A-Za-z]|[A-Za-z])/)
-    .filter(Boolean)
-    .map((t) => ({ text: t, isWord: /[A-Za-z]/.test(t) }))
+// ── 다단어 표현 목록 (긴 것부터 먼저 정의해야 greedy match 가능) ──────
+const MULTI_WORD_EXPRESSIONS = [
+  // 대조·열거
+  'pros and cons', 'ups and downs', 'trial and error', 'back and forth',
+  'sooner or later', 'more or less', 'more and more', 'once in a while',
+  // 삼단어 구동사
+  'get rid of', 'look forward to', 'come up with', 'take care of',
+  'run out of', 'put up with', 'look up to', 'look down on',
+  'catch up with', 'keep up with', 'look out for', 'make fun of',
+  'go along with', 'deal with it', 'get away with',
+  // 전치사구
+  'in order to', 'so as to', 'as well as', 'rather than',
+  'as long as', 'as soon as', 'even though', 'even if',
+  'in spite of', 'due to', 'because of', 'instead of',
+  'on behalf of', 'in terms of', 'in addition to', 'in addition',
+  'in case of', 'in case', 'regardless of', 'prior to', 'as a result',
+  'all of a sudden', 'in the end', 'at the same time', 'on the other hand',
+  'in general', 'in particular', 'in fact', 'by the way',
+  'at least', 'at most', 'at all', 'at first', 'at last', 'at once',
+  'right away', 'so far', 'no matter', 'kind of', 'sort of',
+  'a lot of', 'a lot', 'a bit', 'a little', 'each other', 'one another',
+  // 이단어 구동사
+  'break down', 'break out', 'break up', 'bring up', 'call off', 'call out',
+  'calm down', 'carry on', 'carry out', 'catch up', 'check in', 'check out',
+  'cheer up', 'clean up', 'come back', 'come on', 'come out', 'come up',
+  'cut down', 'cut off', 'deal with', 'end up', 'fall apart', 'fall behind',
+  'figure out', 'fill out', 'find out', 'get along', 'get away', 'get back',
+  'get off', 'get on', 'get out', 'get over', 'get through', 'get up',
+  'give away', 'give in', 'give up', 'go ahead', 'go back', 'go on',
+  'go out', 'go over', 'go through', 'grow up', 'hang out', 'hang on',
+  'hold on', 'hold back', 'keep on', 'keep up', 'let down', 'let go',
+  'look after', 'look for', 'look into', 'look out', 'look up',
+  'make out', 'make up', 'make sure', 'move on', 'pass out', 'pay off',
+  'pick up', 'point out', 'put off', 'put on', 'put out', 'put up',
+  'run away', 'run into', 'run out', 'set off', 'set up',
+  'show off', 'show up', 'slow down', 'stand out', 'stand up',
+  'start over', 'stay up', 'take off', 'take on', 'take out', 'take over',
+  'take up', 'think about', 'think of', 'throw away', 'try out',
+  'turn down', 'turn off', 'turn on', 'turn out', 'turn up',
+  'use up', 'wake up', 'watch out', 'work on', 'work out',
+]
+
+// 긴 표현부터 매칭 (greedy) — 한 번만 컴파일
+const _SORTED_EXPR = [...MULTI_WORD_EXPRESSIONS].sort((a, b) => b.length - a.length)
+const _EXPR_RE = new RegExp(
+  '(' +
+    _SORTED_EXPR.map((e) => e.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+')).join('|') +
+    '|[A-Za-z][A-Za-z\']*[A-Za-z]|[A-Za-z])',
+  'gi',
+)
+
+function tokenize(text: string): Array<{ text: string; isWord: boolean }> {
+  const result: Array<{ text: string; isWord: boolean }> = []
+  let lastIndex = 0
+  const re = new RegExp(_EXPR_RE.source, _EXPR_RE.flags)
+  let m: RegExpExecArray | null
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > lastIndex) result.push({ text: text.slice(lastIndex, m.index), isWord: false })
+    result.push({ text: m[0], isWord: true })
+    lastIndex = m.index + m[0].length
+  }
+  if (lastIndex < text.length) result.push({ text: text.slice(lastIndex), isWord: false })
+  return result
 }
 
 interface Props {

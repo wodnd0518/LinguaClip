@@ -154,7 +154,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         const text = pool[i].text
         const nextText = pool[i + 1]?.text.trim() ?? ''
         // 마침표/느낌표/물음표 뒤 다음 항목이 대문자로 시작할 때만 진짜 문장 경계로 인식
-        // → "that easy." 처럼 중간 마침표가 오인식되는 문제 방지
         if (/[.!?]\s*$/.test(text) && /^[A-Z]/.test(nextText)) {
           sentenceStartIdx = i + 1
           break
@@ -162,8 +161,23 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       }
       const entries = pool.slice(sentenceStartIdx)
       const merged = mergeSubtitleChunks(entries.map((e) => e.text))
-      // 자막 표시 딜레이 0.5초 보정 (전체 히스토리 탐색 금지 — 오래된 타임스탬프 오용 방지)
-      const startTime = Math.max(0, (entries[0]?.time ?? captureTime) - 0.5)
+
+      // startTime: 클릭 시 화면에 보이던 자막(currentText)의 첫 2단어가
+      // pool에서 처음 등장한 시점 → 실제 문장 시작에 가장 가까움
+      // (pool 내부만 탐색해 오래된 타임스탬프 오용 방지)
+      const anchorText = currentText || merged
+      const anchorWords = anchorText
+        .split(/\s+/).filter((w) => /[A-Za-z]/.test(w)).slice(0, 2).join(' ').toLowerCase()
+      let startTime = Math.max(0, (pool[0]?.time ?? captureTime) - 0.3)
+      if (anchorWords) {
+        for (let i = 0; i < pool.length; i++) {
+          if (pool[i].time > captureTime) break // captureTime 이후 항목 제외
+          if (pool[i].text.toLowerCase().includes(anchorWords)) {
+            startTime = Math.max(0, pool[i].time - 0.3)
+            break
+          }
+        }
+      }
 
       subtitleHistory.length = 0
       lastCaptionText = ''
