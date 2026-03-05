@@ -1,28 +1,32 @@
 import { useCallback, useEffect, useState } from 'react'
 import { IS_EXT } from '../lib/env'
 
-export type AIProvider = 'anthropic' | 'openai'
+export type AIProvider = 'anthropic' | 'openai' | 'gemini'
 
 export const PROVIDER_LABELS: Record<AIProvider, string> = {
   anthropic: 'Claude',
   openai: 'OpenAI',
+  gemini: 'Gemini',
 }
 
 export const PROVIDER_KEY_PREFIX: Record<AIProvider, string> = {
   anthropic: 'sk-ant',
   openai: 'sk-',
+  gemini: 'AIzaSy',
 }
 
 const STORAGE_PROVIDER = 'ai_provider'
 const STORAGE_KEY: Record<AIProvider, string> = {
   anthropic: 'anthropic_api_key',
   openai: 'openai_api_key',
+  gemini: 'gemini_api_key',
 }
 
 // 빌드 타임 env 변수 (있으면 우선 사용)
 const ENV_KEYS: Record<AIProvider, string | undefined> = {
   anthropic: import.meta.env.VITE_ANTHROPIC_API_KEY as string | undefined,
   openai: import.meta.env.VITE_OPENAI_API_KEY as string | undefined,
+  gemini: import.meta.env.VITE_GEMINI_API_KEY as string | undefined,
 }
 
 async function storageGet(keys: string[]): Promise<Record<string, string>> {
@@ -50,15 +54,16 @@ function storageRemove(key: string) {
 
 export function useAPIKey() {
   const [provider, setProviderState] = useState<AIProvider>('anthropic')
-  const [keys, setKeys] = useState<Record<AIProvider, string | null>>({ anthropic: null, openai: null })
+  const [keys, setKeys] = useState<Record<AIProvider, string | null>>({ anthropic: null, openai: null, gemini: null })
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    storageGet([STORAGE_PROVIDER, STORAGE_KEY.anthropic, STORAGE_KEY.openai]).then((result) => {
+    storageGet([STORAGE_PROVIDER, STORAGE_KEY.anthropic, STORAGE_KEY.openai, STORAGE_KEY.gemini]).then((result) => {
       setProviderState((result[STORAGE_PROVIDER] as AIProvider) || 'anthropic')
       setKeys({
         anthropic: ENV_KEYS.anthropic || result[STORAGE_KEY.anthropic] || null,
         openai: ENV_KEYS.openai || result[STORAGE_KEY.openai] || null,
+        gemini: ENV_KEYS.gemini || result[STORAGE_KEY.gemini] || null,
       })
       setLoading(false)
     })

@@ -8,6 +8,16 @@ let lastCaptionText = ''
 let shadowLoopTimer: ReturnType<typeof setInterval> | null = null
 
 /**
+ * 실제 영어 자막인지 확인 — 비ASCII 문자가 30% 초과면 YouTube UI 알림으로 판단하여 제외
+ * (예: "영어 (자동 생성됨) 설정을 확인하려면 을 클릭하세요")
+ */
+function isSubtitleText(text: string): boolean {
+  if (!text) return false
+  const nonAscii = (text.match(/[^\x00-\x7F]/g) ?? []).length
+  return nonAscii / text.length <= 0.3
+}
+
+/**
  * YouTube 자동자막 병합 — 점진적 표시 방식 대응
  * 뒤 chunk에 포함된 앞 chunk 제거 → suffix-prefix 겹침 제거 후 병합
  */
@@ -53,6 +63,7 @@ function stopShadowLoop() {
 function onCaptionChange() {
   const text = getCurrentSubtitle()
   if (!text || text === lastCaptionText) return
+  if (!isSubtitleText(text)) return   // YouTube UI 알림 텍스트 무시
   lastCaptionText = text
   const time = getVideo()?.currentTime ?? 0
   subtitleHistory.push({ text, time })
@@ -135,7 +146,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     const captureTime = video?.currentTime ?? 0
     stopShadowLoop() // 캡처 시 기존 쉐도잉 루프 종료
 
-    const currentText = getCurrentSubtitle()
+    const rawCurrentText = getCurrentSubtitle()
+    const currentText = isSubtitleText(rawCurrentText) ? rawCurrentText : ''
     if (currentText && currentText !== lastCaptionText) {
       lastCaptionText = currentText
       subtitleHistory.push({ text: currentText, time: captureTime })

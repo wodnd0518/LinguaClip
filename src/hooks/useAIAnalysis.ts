@@ -5,6 +5,7 @@ export interface AIAnalysis {
   interpretation: string   // 문장 전체 한국어 해석
   usage: string            // 선택 단어/표현의 사용 맥락
   relatedPhrases: string   // 유사 표현
+  nativeExpressions: string // 원어민이 자주 쓰는 비슷한 뉘앙스의 구어 표현
 }
 
 function buildPrompt(sentence: string, word: string, wordTranslation?: string): string {
@@ -17,7 +18,8 @@ function buildPrompt(sentence: string, word: string, wordTranslation?: string): 
 {
   "interpretation": "이 문장 전체의 자연스러운 한국어 해석 (1~2문장)",
   "usage": "${word}이(가) 이 맥락에서 어떻게 쓰이는지 설명 (1~2문장, 한국어)",
-  "relatedPhrases": "비슷한 표현 2~3개를 짧은 한국어 설명과 함께 (예: give in(굴복하다), surrender(항복하다))"
+  "relatedPhrases": "비슷한 표현 2~3개를 짧은 한국어 설명과 함께 (예: give in(굴복하다), surrender(항복하다))",
+  "nativeExpressions": "원어민이 같은/비슷한 뉘앙스를 구어체로 표현할 때 자주 쓰는 표현 2~3개 (예: I'm stuffed.(배불러), I went overboard.(너무 지나쳤어)) 한국어 설명 포함"
 }`
 }
 
@@ -59,6 +61,23 @@ async function callOpenAI(apiKey: string, prompt: string): Promise<string> {
   return data.choices?.[0]?.message?.content ?? ''
 }
 
+async function callGemini(apiKey: string, prompt: string): Promise<string> {
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { maxOutputTokens: 512 },
+      }),
+    },
+  )
+  if (!res.ok) throw new Error(`Gemini ${res.status}`)
+  const data = await res.json() as { candidates: { content: { parts: { text: string }[] } }[] }
+  return data.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
+}
+
 // 모델마다 JSON 형식이 다를 수 있으므로 모든 필드를 string으로 정규화
 function toStr(val: unknown): string {
   if (typeof val === 'string') return val
@@ -89,6 +108,7 @@ function normalizeAnalysis(raw: unknown): AIAnalysis {
     interpretation: toStr(r.interpretation),
     usage: toStr(r.usage),
     relatedPhrases: toStr(r.relatedPhrases),
+    nativeExpressions: toStr(r.nativeExpressions),
   }
 }
 
@@ -112,7 +132,9 @@ export function useAIAnalysis(provider: AIProvider, apiKey: string | null) {
       const prompt = buildPrompt(sentence, word, wordTranslation)
       const text = provider === 'anthropic'
         ? await callAnthropic(apiKey, prompt)
-        : await callOpenAI(apiKey, prompt)
+        : provider === 'gemini'
+          ? await callGemini(apiKey, prompt)
+          : await callOpenAI(apiKey, prompt)
       // 일부 모델은 마크다운 코드블록으로 감싸거나 필드를 객체/배열로 반환하므로 정규화
       const cleaned = text.replace(/^```(?:json)?\n?/m, '').replace(/\n?```$/m, '').trim()
       const parsed = normalizeAnalysis(JSON.parse(cleaned))

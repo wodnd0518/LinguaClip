@@ -514,7 +514,10 @@ export default function CapturePanel({ canSave, onSave, onCapture, onResume }: P
                       saveKey(provider, keyInput); setKeyInput(''); setShowKeyInput(false)
                     }
                   }}
-                  placeholder={provider === 'anthropic' ? 'sk-ant-api03-...' : 'sk-...'}
+                  placeholder={
+                    provider === 'anthropic' ? 'sk-ant-api03-...' :
+                    provider === 'gemini' ? 'AIzaSy...' : 'sk-...'
+                  }
                   className="flex-1 rounded-lg border border-violet-200 bg-white px-3 py-1.5 text-xs outline-none transition focus:border-violet-400 focus:ring-1 focus:ring-violet-200"
                 />
                 <button
@@ -534,7 +537,7 @@ export default function CapturePanel({ canSave, onSave, onCapture, onResume }: P
                 )}
               </div>
               <p className="text-[10px] text-violet-400">
-                {provider === 'anthropic' ? 'console.anthropic.com' : 'platform.openai.com'}에서 발급 · 기기에만 저장
+                {provider === 'anthropic' ? 'console.anthropic.com' : provider === 'gemini' ? 'aistudio.google.com' : 'platform.openai.com'}에서 발급 · 기기에만 저장
               </p>
             </div>
           )}
@@ -565,6 +568,12 @@ export default function CapturePanel({ canSave, onSave, onCapture, onResume }: P
                     <p className="mb-0.5 text-[11px] font-semibold uppercase tracking-wider text-violet-400">유사 표현</p>
                     <p className="leading-relaxed text-violet-900">{aiAnalysis.relatedPhrases}</p>
                   </div>
+                  {aiAnalysis.nativeExpressions && (
+                    <div>
+                      <p className="mb-0.5 text-[11px] font-semibold uppercase tracking-wider text-violet-400">원어민 표현</p>
+                      <p className="leading-relaxed text-violet-900">{aiAnalysis.nativeExpressions}</p>
+                    </div>
+                  )}
                 </div>
               )}
             </>
