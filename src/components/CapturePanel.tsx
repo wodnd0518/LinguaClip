@@ -126,13 +126,13 @@ function tokenize(text: string): Array<{ text: string; isWord: boolean }> {
 
 interface Props {
   canSave: boolean
-  onSave?: (word: string, comment: string, context: string, startTime: number, wordTranslation?: string, endTime?: number) => Promise<void>
-  onCapture?: () => Promise<{ text: string; startTime: number; endTime: number }>
+  onSave?: (word: string, comment: string, context: string, startTime: number, wordTranslation?: string, endTime?: number, videoId?: string) => Promise<void>
+  onCapture?: () => Promise<{ text: string; startTime: number; endTime: number; videoId?: string }>
   onResume?: () => void
 }
 
 export default function CapturePanel({ canSave, onSave, onCapture, onResume }: Props) {
-  const [captured, setCaptured] = useState<{ text: string; startTime: number; endTime: number } | null>(null)
+  const [captured, setCaptured] = useState<{ text: string; startTime: number; endTime: number; videoId?: string } | null>(null)
   const [capturing, setCapturing] = useState(false)
   const [selectedWord, setSelectedWord] = useState<string | null>(null)
   const [comment, setComment] = useState('')
@@ -182,7 +182,7 @@ export default function CapturePanel({ canSave, onSave, onCapture, onResume }: P
     if (!onSave || !selectedWord || !captured) return
     setSaving(true)
     try {
-      await onSave(selectedWord, comment, captured.text, captured.startTime, wordTrans ?? undefined, captured.endTime)
+      await onSave(selectedWord, comment, captured.text, captured.startTime, wordTrans ?? undefined, captured.endTime, captured.videoId)
       setSavedWord(selectedWord)
       setComment('')
       setTimeout(() => setSavedWord(null), 2000)

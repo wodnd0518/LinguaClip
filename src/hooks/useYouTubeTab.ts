@@ -13,6 +13,7 @@ export function useYouTubeTab() {
   const [videoInfo, setVideoInfo] = useState<VideoInfo | null>(null)
   const [isOnYouTube, setIsOnYouTube] = useState(false)
   const tabIdRef = useRef<number | null>(null)
+  const videoInfoRef = useRef<VideoInfo | null>(null)
 
   const poll = useCallback(() => {
     if (!IS_EXT) return
@@ -23,6 +24,7 @@ export function useYouTubeTab() {
       if (!tab?.id || !tab.url?.includes('youtube.com/watch')) {
         setIsOnYouTube(false)
         setVideoInfo(null)
+        videoInfoRef.current = null
         tabIdRef.current = null
         return
       }
@@ -32,7 +34,11 @@ export function useYouTubeTab() {
 
       chrome.tabs.sendMessage(tab.id, { type: 'YT_GET_INFO' }, (response) => {
         if (chrome.runtime.lastError) return // 콘텐츠 스크립트 아직 미준비
-        if (response) setVideoInfo(response as VideoInfo)
+        if (response) {
+          const info = response as VideoInfo
+          setVideoInfo(info)
+          videoInfoRef.current = info
+        }
       })
     })
   }, [])
@@ -75,12 +81,15 @@ export function useYouTubeTab() {
     })
   }, [])
 
-  const captureSubtitle = useCallback((): Promise<{ text: string; startTime: number; endTime: number }> => {
+  const captureSubtitle = useCallback((): Promise<{ text: string; startTime: number; endTime: number; videoId: string }> => {
     return new Promise((resolve) => {
-      if (!IS_EXT || !tabIdRef.current) return resolve({ text: '', startTime: 0, endTime: 0 })
+      const empty = { text: '', startTime: 0, endTime: 0, videoId: '' }
+      if (!IS_EXT || !tabIdRef.current) return resolve(empty)
+      // videoInfoRef로 캡처 시점의 videoId를 고정
+      const videoId = videoInfoRef.current?.videoId ?? ''
       chrome.tabs.sendMessage(tabIdRef.current, { type: 'YT_CAPTURE_SENTENCE' }, (response) => {
-        if (chrome.runtime.lastError) return resolve({ text: '', startTime: 0, endTime: 0 })
-        resolve(response ?? { text: '', startTime: 0, endTime: 0 })
+        if (chrome.runtime.lastError) return resolve(empty)
+        resolve(response ? { ...(response as { text: string; startTime: number; endTime: number }), videoId } : empty)
       })
     })
   }, [])

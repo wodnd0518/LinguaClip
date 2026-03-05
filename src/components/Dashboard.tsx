@@ -102,9 +102,9 @@ export default function Dashboard() {
     setVideoId(id)
   }
 
-  async function handleSave(word: string, comment: string, context: string, startTime?: number, wordTranslation?: string, endTime?: number): Promise<void> {
+  async function handleSave(word: string, comment: string, context: string, startTime?: number, wordTranslation?: string, endTime?: number, videoId?: string): Promise<void> {
     const time = startTime !== undefined ? startTime : getCurrentTime()
-    await saveClip(word, getCurrentVideoId(), time, comment, context, wordTranslation, endTime)
+    await saveClip(word, videoId || getCurrentVideoId(), time, comment, context, wordTranslation, endTime)
   }
 
   function handleSeek(clip: Clip) {
@@ -153,7 +153,7 @@ export default function Dashboard() {
     }
   }
 
-  const canSave = IS_EXT ? isOnYouTube : !!videoId
+  const canSave = IS_EXT ? true : !!videoId
 
   return (
     <div className="min-h-screen bg-slate-50">
