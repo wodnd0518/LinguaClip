@@ -1,8 +1,6 @@
 import { useRef, useState } from 'react'
 import { useDictionary } from '../hooks/useDictionary'
 import { useTranslation } from '../hooks/useTranslation'
-import { useAIAnalysis } from '../hooks/useAIAnalysis'
-import { useAPIKey, PROVIDER_LABELS, PROVIDER_KEY_PREFIX, type AIProvider } from '../hooks/useAPIKey'
 
 // ── 영어 기능어 목록 (약하게 발음되는 단어들) ───────────────────
 // 이 목록에 없는 단어 = 내용어(content word) → 강세 표시
@@ -140,15 +138,9 @@ export default function CapturePanel({ canSave, onSave, onCapture, onResume }: P
   const [savedWord, setSavedWord] = useState<string | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
 
-  const { provider, setProvider, activeKey, saveKey } = useAPIKey()
-  const [keyInput, setKeyInput] = useState('')
-  const [showKeyInput, setShowKeyInput] = useState(false)
-  const [keyLoading] = useState(false)
-
   const { entry, loading: dictLoading, error: dictError, lookup, clear: clearDict } = useDictionary()
   const { translation: sentTrans, loading: sentTransLoading, translate: transSent, clear: clearSentTrans } = useTranslation()
   const { translation: wordTrans, translate: transWord, clear: clearWordTrans } = useTranslation()
-  const { analysis: aiAnalysis, loading: aiLoading, error: aiError, analyze, clear: clearAI } = useAIAnalysis(provider, activeKey)
 
   async function handleCapture() {
     if (!onCapture) return
@@ -159,7 +151,6 @@ export default function CapturePanel({ canSave, onSave, onCapture, onResume }: P
     clearDict()
     clearSentTrans()
     clearWordTrans()
-    clearAI()
     try {
       const result = await onCapture()
       if (result.text) {
@@ -174,7 +165,6 @@ export default function CapturePanel({ canSave, onSave, onCapture, onResume }: P
   function handleWordClick(word: string) {
     setSelectedWord(word)
     setSavedWord(null)
-    clearAI()
     lookup(word)
     transWord(word)
   }
@@ -199,7 +189,6 @@ export default function CapturePanel({ canSave, onSave, onCapture, onResume }: P
     clearDict()
     clearSentTrans()
     clearWordTrans()
-    clearAI()
     setComment('')
     setSavedWord(null)
   }
@@ -452,134 +441,6 @@ export default function CapturePanel({ canSave, onSave, onCapture, onResume }: P
         </div>
       )}
 
-      {/* ── AI 분석 카드 ── */}
-      {selectedWord && captured && !keyLoading && (
-        <div className="rounded-xl border border-violet-200 bg-violet-50 p-4">
-
-          {/* 헤더: 제목 + provider 탭 + 분석하기 버튼 */}
-          <div className="mb-3 flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wider text-violet-500">AI 분석</span>
-            <div className="flex items-center gap-2">
-              {/* Provider 탭 */}
-              <div className="flex rounded-lg border border-violet-200 bg-white p-0.5">
-                {(Object.keys(PROVIDER_LABELS) as AIProvider[]).map((p) => (
-                  <button
-                    key={p}
-                    onClick={() => { setProvider(p); clearAI(); setShowKeyInput(false); setKeyInput('') }}
-                    className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
-                      provider === p
-                        ? 'bg-violet-500 text-white'
-                        : 'text-violet-400 hover:text-violet-600'
-                    }`}
-                  >
-                    {PROVIDER_LABELS[p]}
-                  </button>
-                ))}
-              </div>
-              {/* 키 변경 / 분석하기 */}
-              {activeKey && !showKeyInput && (
-                <button onClick={() => setShowKeyInput(true)} className="text-[10px] text-violet-300 hover:text-violet-500">
-                  키 변경
-                </button>
-              )}
-              {activeKey && !aiAnalysis && !aiLoading && !showKeyInput && (
-                <button
-                  onClick={() => analyze(captured.text, selectedWord, wordTrans ?? undefined)}
-                  className="flex items-center gap-1 rounded-md bg-violet-500 px-2.5 py-1 text-xs font-medium text-white transition hover:bg-violet-600"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <polygon points="5 3 19 12 5 21 5 3"/>
-                  </svg>
-                  분석하기
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* API 키 미설정 또는 키 변경 모드 */}
-          {(!activeKey || showKeyInput) && (
-            <div className="flex flex-col gap-2">
-              <p className="text-xs text-violet-600">
-                {activeKey
-                  ? `${PROVIDER_LABELS[provider]} API 키를 변경합니다.`
-                  : `${PROVIDER_LABELS[provider]} API 키를 입력하면 AI 분석이 활성화됩니다.`}
-              </p>
-              <div className="flex gap-2">
-                <input
-                  type="password"
-                  value={keyInput}
-                  onChange={(e) => setKeyInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && keyInput.startsWith(PROVIDER_KEY_PREFIX[provider])) {
-                      saveKey(provider, keyInput); setKeyInput(''); setShowKeyInput(false)
-                    }
-                  }}
-                  placeholder={
-                    provider === 'anthropic' ? 'sk-ant-api03-...' :
-                    provider === 'gemini' ? 'AIzaSy...' : 'sk-...'
-                  }
-                  className="flex-1 rounded-lg border border-violet-200 bg-white px-3 py-1.5 text-xs outline-none transition focus:border-violet-400 focus:ring-1 focus:ring-violet-200"
-                />
-                <button
-                  onClick={() => { saveKey(provider, keyInput); setKeyInput(''); setShowKeyInput(false) }}
-                  disabled={!keyInput.startsWith(PROVIDER_KEY_PREFIX[provider])}
-                  className="rounded-lg bg-violet-500 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-violet-600 disabled:opacity-40"
-                >
-                  저장
-                </button>
-                {activeKey && showKeyInput && (
-                  <button
-                    onClick={() => { setShowKeyInput(false); setKeyInput('') }}
-                    className="rounded-lg border border-violet-200 px-2 py-1.5 text-xs text-violet-500 hover:bg-violet-100"
-                  >
-                    취소
-                  </button>
-                )}
-              </div>
-              <p className="text-[10px] text-violet-400">
-                {provider === 'anthropic' ? 'console.anthropic.com' : provider === 'gemini' ? 'aistudio.google.com' : 'platform.openai.com'}에서 발급 · 기기에만 저장
-              </p>
-            </div>
-          )}
-
-          {/* 분석 결과 */}
-          {activeKey && !showKeyInput && (
-            <>
-              {aiLoading && (
-                <div className="flex items-center gap-2 text-xs text-violet-400">
-                  <div className="h-3 w-3 animate-spin rounded-full border-2 border-violet-400 border-t-transparent" />
-                  {PROVIDER_LABELS[provider]}가 분석 중…
-                </div>
-              )}
-              {aiError && aiError !== 'no_key' && !aiLoading && (
-                <p className="text-xs text-red-400">{aiError}</p>
-              )}
-              {aiAnalysis && !aiLoading && (
-                <div className="flex flex-col gap-3 text-sm">
-                  <div>
-                    <p className="mb-0.5 text-[11px] font-semibold uppercase tracking-wider text-violet-400">문장 해석</p>
-                    <p className="leading-relaxed text-violet-900">{aiAnalysis.interpretation}</p>
-                  </div>
-                  <div>
-                    <p className="mb-0.5 text-[11px] font-semibold uppercase tracking-wider text-violet-400">사용 맥락</p>
-                    <p className="leading-relaxed text-violet-900">{aiAnalysis.usage}</p>
-                  </div>
-                  <div>
-                    <p className="mb-0.5 text-[11px] font-semibold uppercase tracking-wider text-violet-400">유사 표현</p>
-                    <p className="leading-relaxed text-violet-900">{aiAnalysis.relatedPhrases}</p>
-                  </div>
-                  {aiAnalysis.nativeExpressions && (
-                    <div>
-                      <p className="mb-0.5 text-[11px] font-semibold uppercase tracking-wider text-violet-400">원어민 표현</p>
-                      <p className="leading-relaxed text-violet-900">{aiAnalysis.nativeExpressions}</p>
-                    </div>
-                  )}
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      )}
     </div>
   )
 }
