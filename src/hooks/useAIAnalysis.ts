@@ -23,6 +23,16 @@ function buildPrompt(sentence: string, word: string, wordTranslation?: string): 
 }`
 }
 
+async function extractApiError(res: Response, prefix: string): Promise<never> {
+  let detail = ''
+  try {
+    const body = await res.json() as Record<string, unknown>
+    const msg = (body.error as Record<string, unknown>)?.message ?? body.message ?? JSON.stringify(body)
+    detail = `: ${msg}`
+  } catch { /* ignore */ }
+  throw new Error(`${prefix} ${res.status}${detail}`)
+}
+
 async function callAnthropic(apiKey: string, prompt: string): Promise<string> {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -38,7 +48,7 @@ async function callAnthropic(apiKey: string, prompt: string): Promise<string> {
       messages: [{ role: 'user', content: prompt }],
     }),
   })
-  if (!res.ok) throw new Error(`Anthropic ${res.status}`)
+  if (!res.ok) await extractApiError(res, 'Claude')
   const data = await res.json() as { content: { text: string }[] }
   return data.content?.[0]?.text ?? ''
 }
@@ -56,7 +66,7 @@ async function callOpenAI(apiKey: string, prompt: string): Promise<string> {
       messages: [{ role: 'user', content: prompt }],
     }),
   })
-  if (!res.ok) throw new Error(`OpenAI ${res.status}`)
+  if (!res.ok) await extractApiError(res, 'OpenAI')
   const data = await res.json() as { choices: { message: { content: string } }[] }
   return data.choices?.[0]?.message?.content ?? ''
 }
@@ -73,7 +83,7 @@ async function callGemini(apiKey: string, prompt: string): Promise<string> {
       }),
     },
   )
-  if (!res.ok) throw new Error(`Gemini ${res.status}`)
+  if (!res.ok) await extractApiError(res, 'Gemini')
   const data = await res.json() as { candidates: { content: { parts: { text: string }[] } }[] }
   return data.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
 }
@@ -140,8 +150,8 @@ export function useAIAnalysis(provider: AIProvider, apiKey: string | null) {
       const parsed = normalizeAnalysis(JSON.parse(cleaned))
       cacheRef.current.set(cacheKey, parsed)
       setAnalysis(parsed)
-    } catch {
-      setError('분석 실패 — API 키 또는 네트워크를 확인하세요.')
+    } catch (e) {
+      setError(e instanceof Error ? `분석 실패 — ${e.message}` : '분석 실패 — 네트워크를 확인하세요.')
     } finally {
       setLoading(false)
     }

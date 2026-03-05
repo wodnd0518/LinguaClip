@@ -177,7 +177,6 @@ export default function CapturePanel({ canSave, onSave, onCapture, onResume }: P
     clearAI()
     lookup(word)
     transWord(word)
-    if (captured) analyze(captured.text, word)
   }
 
   async function handleSave() {
@@ -410,43 +409,43 @@ export default function CapturePanel({ canSave, onSave, onCapture, onResume }: P
                   </div>
                 </div>
               )}
+            </div>
+          )}
 
-              {/* 코멘트 + 저장 */}
-              {canSave && onSave && captured && (
-                <div className="flex flex-col gap-2 border-t border-slate-100 pt-4">
-                  <textarea
-                    value={comment}
-                    onChange={(e) => setComment(e.target.value)}
-                    placeholder="코멘트 (선택)"
-                    rows={2}
-                    className="resize-none rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
-                  />
-                  <div className="flex items-center justify-end gap-2">
-                    <button
-                      onClick={handleResume}
-                      className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-600 transition hover:bg-slate-50"
-                    >
-                      ▶ 계속 재생
-                    </button>
-                    <button
-                      onClick={handleSave}
-                      disabled={saving}
-                      className={`rounded-lg px-4 py-2 text-sm font-medium transition disabled:cursor-not-allowed ${
-                        savedWord
-                          ? 'bg-green-50 text-green-600'
-                          : 'bg-indigo-500 text-white hover:bg-indigo-600 disabled:opacity-50'
-                      }`}
-                    >
-                      {saving ? (
-                        <span className="flex items-center gap-1.5">
-                          <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                          저장 중…
-                        </span>
-                      ) : savedWord ? '저장됨 ✓' : '저장'}
-                    </button>
-                  </div>
-                </div>
-              )}
+          {/* 코멘트 + 저장 — dict 로딩 여부와 무관하게 항상 표시 */}
+          {canSave && onSave && captured && (
+            <div className="flex flex-col gap-2 border-t border-slate-100 pt-4">
+              <textarea
+                value={comment}
+                onChange={(e) => setComment(e.target.value)}
+                placeholder="코멘트 (선택)"
+                rows={2}
+                className="resize-none rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+              />
+              <div className="flex items-center justify-end gap-2">
+                <button
+                  onClick={handleResume}
+                  className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-600 transition hover:bg-slate-50"
+                >
+                  ▶ 계속 재생
+                </button>
+                <button
+                  onClick={handleSave}
+                  disabled={saving}
+                  className={`rounded-lg px-4 py-2 text-sm font-medium transition disabled:cursor-not-allowed ${
+                    savedWord
+                      ? 'bg-green-50 text-green-600'
+                      : 'bg-indigo-500 text-white hover:bg-indigo-600 disabled:opacity-50'
+                  }`}
+                >
+                  {saving ? (
+                    <span className="flex items-center gap-1.5">
+                      <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                      저장 중…
+                    </span>
+                  ) : savedWord ? '저장됨 ✓' : '저장'}
+                </button>
+              </div>
             </div>
           )}
         </div>

@@ -168,11 +168,17 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         // 경계 조건 1: 마침표/느낌표/물음표 뒤 대문자로 시작
         const isPunctBoundary = /[.!?]\s*$/.test(text) && /^[A-Z]/.test(nextText)
         // 경계 조건 2: YouTube 자막 리셋 감지
-        // (텍스트가 50% 이상 줄어들고, 이전 텍스트가 새 텍스트를 포함하지 않음)
-        // → 새 문장이 시작되면 YouTube가 자막을 짧게 초기화함
+        // Case A: 이전 텍스트와 무관한 새 텍스트 (완전히 다른 내용)
+        // Case B: 새 텍스트가 이전 긴 텍스트의 PREFIX (같은 문장 처음으로 되감기)
+        //   예) text="work, actually. So anyway, I ended up..."
+        //       nextText="work, actually."  → text가 nextText로 시작 = 리셋
+        const shortNext = nextText.toLowerCase().slice(0, Math.min(nextText.length, 20))
         const isReset = nextText.length > 0 &&
           nextText.length < text.length * 0.5 &&
-          !text.toLowerCase().includes(nextText.toLowerCase().slice(0, Math.min(nextText.length, 15)))
+          (
+            !text.toLowerCase().includes(shortNext) ||           // Case A: 무관한 텍스트
+            text.toLowerCase().startsWith(shortNext)             // Case B: 같은 문장 리셋
+          )
         if (isPunctBoundary || isReset) {
           sentenceStartIdx = i + 1
           break
