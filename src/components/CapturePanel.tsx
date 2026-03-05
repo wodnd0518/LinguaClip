@@ -319,8 +319,8 @@ export default function CapturePanel({ canSave, onSave, onCapture, onResume }: P
             </p>
           )}
 
-          {/* 코멘트 + 저장 — 단어 선택 즉시 표시, AI/사전 상태와 무관 */}
-          {selectedWord && canSave && onSave && (
+          {/* 코멘트 + 저장 — 단어 선택 즉시 표시, canSave/onSave 상태와 무관하게 렌더 */}
+          {selectedWord && (
             <div className="mt-3 flex flex-col gap-2 border-t border-indigo-200 pt-3">
               <textarea
                 value={comment}
@@ -337,8 +337,8 @@ export default function CapturePanel({ canSave, onSave, onCapture, onResume }: P
                   ▶ 계속 재생
                 </button>
                 <button
-                  onClick={handleSave}
-                  disabled={saving}
+                  onClick={canSave && onSave ? handleSave : undefined}
+                  disabled={saving || !canSave || !onSave}
                   className={`rounded-lg px-4 py-1.5 text-sm font-medium transition disabled:cursor-not-allowed ${
                     savedWord
                       ? 'bg-green-50 text-green-600'

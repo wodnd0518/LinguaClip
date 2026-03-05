@@ -84,8 +84,12 @@ async function callGemini(apiKey: string, prompt: string): Promise<string> {
     },
   )
   if (!res.ok) await extractApiError(res, 'Gemini')
-  const data = await res.json() as { candidates: { content: { parts: { text: string }[] } }[] }
-  return data.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
+  const data = await res.json() as {
+    candidates: { content: { parts: { text?: string; thought?: boolean }[] } }[]
+  }
+  // gemini-2.5-flash는 thinking 모델 — thought:true 파트는 추론 텍스트이므로 제외
+  const parts = data.candidates?.[0]?.content?.parts ?? []
+  return parts.filter((p) => !p.thought).map((p) => p.text ?? '').join('')
 }
 
 // 모델마다 JSON 형식이 다를 수 있으므로 모든 필드를 string으로 정규화
