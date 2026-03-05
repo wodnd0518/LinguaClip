@@ -318,6 +318,43 @@ export default function CapturePanel({ canSave, onSave, onCapture, onResume }: P
               ● 점이 있는 단어가 강조되는 부분 · 단어를 클릭해 사전을 확인하세요
             </p>
           )}
+
+          {/* 코멘트 + 저장 — 단어 선택 즉시 표시, AI/사전 상태와 무관 */}
+          {selectedWord && canSave && onSave && (
+            <div className="mt-3 flex flex-col gap-2 border-t border-indigo-200 pt-3">
+              <textarea
+                value={comment}
+                onChange={(e) => setComment(e.target.value)}
+                placeholder="코멘트 (선택)"
+                rows={2}
+                className="resize-none rounded-lg border border-indigo-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+              />
+              <div className="flex items-center justify-end gap-2">
+                <button
+                  onClick={handleResume}
+                  className="rounded-lg border border-indigo-200 bg-white px-3 py-1.5 text-sm text-indigo-600 transition hover:bg-indigo-100"
+                >
+                  ▶ 계속 재생
+                </button>
+                <button
+                  onClick={handleSave}
+                  disabled={saving}
+                  className={`rounded-lg px-4 py-1.5 text-sm font-medium transition disabled:cursor-not-allowed ${
+                    savedWord
+                      ? 'bg-green-50 text-green-600'
+                      : 'bg-indigo-500 text-white hover:bg-indigo-600 disabled:opacity-50'
+                  }`}
+                >
+                  {saving ? (
+                    <span className="flex items-center gap-1.5">
+                      <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                      저장 중…
+                    </span>
+                  ) : savedWord ? '저장됨 ✓' : '저장'}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -412,42 +449,6 @@ export default function CapturePanel({ canSave, onSave, onCapture, onResume }: P
             </div>
           )}
 
-          {/* 코멘트 + 저장 — dict 로딩 여부와 무관하게 항상 표시 */}
-          {canSave && onSave && captured && (
-            <div className="flex flex-col gap-2 border-t border-slate-100 pt-4">
-              <textarea
-                value={comment}
-                onChange={(e) => setComment(e.target.value)}
-                placeholder="코멘트 (선택)"
-                rows={2}
-                className="resize-none rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
-              />
-              <div className="flex items-center justify-end gap-2">
-                <button
-                  onClick={handleResume}
-                  className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-600 transition hover:bg-slate-50"
-                >
-                  ▶ 계속 재생
-                </button>
-                <button
-                  onClick={handleSave}
-                  disabled={saving}
-                  className={`rounded-lg px-4 py-2 text-sm font-medium transition disabled:cursor-not-allowed ${
-                    savedWord
-                      ? 'bg-green-50 text-green-600'
-                      : 'bg-indigo-500 text-white hover:bg-indigo-600 disabled:opacity-50'
-                  }`}
-                >
-                  {saving ? (
-                    <span className="flex items-center gap-1.5">
-                      <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                      저장 중…
-                    </span>
-                  ) : savedWord ? '저장됨 ✓' : '저장'}
-                </button>
-              </div>
-            </div>
-          )}
         </div>
       )}
 
