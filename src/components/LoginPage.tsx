@@ -1,9 +1,14 @@
 import { useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
+import { IS_EXT } from '../lib/env'
 
 export default function LoginPage() {
   const { signInWithGoogle } = useAuth()
   const [isSigningIn, setIsSigningIn] = useState(false)
+  const [copied, setCopied] = useState(false)
+
+  const extId = IS_EXT ? chrome.runtime.id : null
+  const authorizedDomain = extId ? `chrome-extension://${extId}` : null
 
   async function handleSignIn() {
     if (isSigningIn) return
@@ -13,6 +18,13 @@ export default function LoginPage() {
     } catch {
       setIsSigningIn(false)
     }
+  }
+
+  async function handleCopy() {
+    if (!authorizedDomain) return
+    await navigator.clipboard.writeText(authorizedDomain)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
   }
 
   return (
@@ -49,6 +61,26 @@ export default function LoginPage() {
         </svg>
         {isSigningIn ? 'Signing in…' : 'Continue with Google'}
       </button>
+
+      {IS_EXT && authorizedDomain && (
+        <div className="mx-4 max-w-sm rounded-lg border border-amber-200 bg-amber-50 p-4 text-xs text-amber-800">
+          <p className="mb-2 font-semibold">⚠️ Firebase 설정 필요 (최초 1회)</p>
+          <p className="mb-3 text-amber-700">
+            Firebase Console → Authentication → Settings → Authorized Domains에 아래 주소를 추가하세요.
+          </p>
+          <div className="flex items-center gap-2">
+            <code className="flex-1 break-all rounded bg-amber-100 px-2 py-1 font-mono text-amber-900">
+              {authorizedDomain}
+            </code>
+            <button
+              onClick={handleCopy}
+              className="shrink-0 rounded bg-amber-200 px-2 py-1 font-medium transition hover:bg-amber-300"
+            >
+              {copied ? '✓' : '복사'}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
