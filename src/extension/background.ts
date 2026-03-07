@@ -5,15 +5,58 @@ chrome.action.onClicked.addListener((tab) => {
   }
 })
 
-// YT_GET_TRANSCRIPT: YouTube 페이지의 MAIN world에서 fetch 실행
-// → same-origin + 사용자 쿠키가 자동 포함되어 자막 URL 접근 가능
+interface CaptionTrack {
+  baseUrl: string
+  languageCode: string
+  name?: { simpleText?: string }
+  kind?: string
+}
+
+interface CaptionSegment {
+  tStartMs: number
+  dDurationMs?: number
+  segs?: { utf8: string }[]
+}
+
+function parseJson3(events: CaptionSegment[]) {
+  return (events ?? [])
+    .filter((e) => (e.segs?.length ?? 0) > 0)
+    .map((e) => ({
+      start: e.tStartMs / 1000,
+      dur: (e.dDurationMs ?? 0) / 1000,
+      text: (e.segs ?? [])
+        .map((s) => s.utf8)
+        .join('')
+        .replace(/\n/g, ' ')
+        .trim(),
+    }))
+    .filter((l) => l.text)
+}
+
+// Service worker에는 DOMParser 없음 → regex로 XML 파싱
+function parseXmlCaptions(xml: string): { start: number; dur: number; text: string }[] {
+  const lines: { start: number; dur: number; text: string }[] = []
+  const re = /<text[^>]+start="([\d.]+)"[^>]*dur="([\d.]+)"[^>]*>([\s\S]*?)<\/text>/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(xml)) !== null) {
+    const text = m[3]
+      .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&#\d+;/g, '')
+      .replace(/\n/g, ' ').trim()
+    if (text) lines.push({ start: parseFloat(m[1]), dur: parseFloat(m[2]), text })
+  }
+  return lines
+}
+
+// YT_GET_TRANSCRIPT 처리
+// 구조: executeScript(MAIN world)로 captionTracks URL 정보만 읽기
+//       → background에서 직접 fetch (YouTube 서비스 워커 우회)
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type !== 'YT_GET_TRANSCRIPT') return false
 
   const videoId = message.videoId as string
   const lang = (message.lang as string | undefined) ?? 'en'
 
-  // 현재 활성 YouTube 탭 찾기
   chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
     const tab = tabs[0]
     if (!tab?.id) {
@@ -22,169 +65,119 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     }
 
     try {
-      const results = await chrome.scripting.executeScript({
+      // ── Step 1: captionTracks 정보만 읽기 (fetch 없음) ──
+      const scriptResult = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
-        world: 'MAIN', // YouTube 페이지 JS context에서 실행 (쿠키 포함)
-        args: [videoId, lang],
-        func: async (vid: string, langCode: string) => {
-          // ── 자막 파싱 ──
-          interface CaptionSegment {
-            tStartMs: number
-            dDurationMs?: number
-            segs?: { utf8: string }[]
-          }
-
-          function parseJson3(events: CaptionSegment[]) {
-            return (events ?? [])
-              .filter((e) => (e.segs?.length ?? 0) > 0)
-              .map((e) => ({
-                start: e.tStartMs / 1000,
-                dur: (e.dDurationMs ?? 0) / 1000,
-                text: (e.segs ?? [])
-                  .map((s) => s.utf8)
-                  .join('')
-                  .replace(/\n/g, ' ')
-                  .trim(),
-              }))
-              .filter((l) => l.text)
-          }
-
-          // ── captionTracks 가져오기 ──
-          type Track = {
-            baseUrl: string
-            languageCode: string
-            name?: { simpleText?: string }
-            kind?: string
-          }
-          let tracks: Track[] | null = null
-
+        world: 'MAIN',
+        args: [videoId],
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        func: (_vid: string) => {
           try {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const ipr = (window as any).ytInitialPlayerResponse
             const raw = ipr?.captions?.playerCaptionsTracklistRenderer?.captionTracks
-            if (Array.isArray(raw) && raw.length > 0) tracks = raw as Track[]
-            console.log('[LC] ytInitialPlayerResponse tracks:', tracks?.length ?? 0)
+            if (Array.isArray(raw) && raw.length > 0) {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              return raw.map((t: any) => ({
+                baseUrl: t.baseUrl as string,
+                languageCode: t.languageCode as string,
+                name: t.name as { simpleText?: string } | undefined,
+                kind: t.kind as string | undefined,
+              }))
+            }
           } catch { /* ignore */ }
-
-          // Fallback: timedtext list API — ytInitialPlayerResponse보다 느리지만 안정적
-          // (HTML 전체 fetch + 정규식보다 신뢰성 높음)
-          if (!tracks) {
-            try {
-              const listRes = await fetch(
-                `https://www.youtube.com/api/timedtext?v=${vid}&type=list`,
-                { headers: { 'Accept-Language': 'en-US,en;q=0.9' } },
-              )
-              if (listRes.ok) {
-                const xml = await listRes.text()
-                const xmlDoc = new DOMParser().parseFromString(xml, 'text/xml')
-                const trackEls = Array.from(xmlDoc.querySelectorAll('track'))
-                if (trackEls.length > 0) {
-                  tracks = trackEls.map((el) => {
-                    const langCode = el.getAttribute('lang_code') ?? ''
-                    const name = el.getAttribute('name') ?? ''
-                    const langOriginal = el.getAttribute('lang_original') ?? langCode
-                    const kind = el.getAttribute('kind') ?? undefined
-                    const baseUrl =
-                      `https://www.youtube.com/api/timedtext?v=${vid}` +
-                      `&lang=${encodeURIComponent(langCode)}` +
-                      (kind ? `&kind=${kind}` : '') +
-                      (name ? `&name=${encodeURIComponent(name)}` : '') +
-                      `&fmt=json3`
-                    return { baseUrl, languageCode: langCode, name: { simpleText: langOriginal }, kind }
-                  })
-                }
-              }
-            } catch { /* ignore */ }
-          }
-
-          if (!tracks) return { lines: [], languages: [], error: '이 영상에는 자막이 없어요.' }
-
-          const track =
-            tracks.find((t) => t.languageCode === langCode) ??
-            tracks.find((t) => t.languageCode.startsWith(langCode.split('-')[0])) ??
-            tracks[0]
-
-          if (!track) return { lines: [], languages: [], error: '자막 트랙을 찾을 수 없어요.' }
-
-          async function fetchRaw(url: string): Promise<string> {
-            try {
-              const res = await fetch(url)
-              const text = res.ok ? await res.text() : ''
-              console.log(`[LC] fetch ${res.status} len=${text.length}`, url.split('?')[1])
-              return text
-            } catch (e) {
-              console.log('[LC] fetch error:', e, url.split('?')[1])
-              return ''
-            }
-          }
-
-          function parseXml(xml: string): CaptionSegment[] {
-            const doc = new DOMParser().parseFromString(xml, 'text/xml')
-            return Array.from(doc.querySelectorAll('text')).map((el) => ({
-              tStartMs: parseFloat(el.getAttribute('start') ?? '0') * 1000,
-              dDurationMs: parseFloat(el.getAttribute('dur') ?? '0') * 1000,
-              segs: [{ utf8: el.textContent ?? '' }],
-            }))
-          }
-
-          const captionUrl = track.baseUrl.includes('fmt=')
-            ? track.baseUrl
-            : `${track.baseUrl}&fmt=json3`
-
-          const base = `https://www.youtube.com/api/timedtext?v=${vid}&lang=${encodeURIComponent(track.languageCode)}`
-          const kindParam = track.kind ? `&kind=${track.kind}` : ''
-          console.log('[LC] selected track:', track.languageCode, track.kind)
-
-          // fmt=json3 시도 목록
-          const json3Urls = [
-            captionUrl,
-            `${base}${kindParam}&fmt=json3`,
-            `${base}&fmt=json3`,
-          ]
-          // fmt 없음 (XML) 시도 목록 — json3가 모두 빈 응답일 때 fallback
-          const xmlUrls = [
-            `${base}${kindParam}`,
-            `${base}`,
-          ]
-
-          let text = ''
-          let isXml = false
-
-          for (const url of json3Urls) {
-            text = await fetchRaw(url)
-            if (text.trim()) break
-          }
-          if (!text.trim()) {
-            for (const url of xmlUrls) {
-              text = await fetchRaw(url)
-              if (text.trim()) { isXml = true; break }
-            }
-          }
-
-          if (!text.trim()) return { lines: [], languages: [], error: '자막을 불러올 수 없어요. 이 영상에는 자막이 없거나 접근이 제한되어 있어요.' }
-
-          const events: CaptionSegment[] = isXml
-            ? parseXml(text)
-            : (JSON.parse(text) as { events: CaptionSegment[] }).events
-
-          return {
-            lines: parseJson3(events),
-            languages: tracks.map((t) => ({
-              code: t.languageCode,
-              name: t.name?.simpleText ?? t.languageCode,
-              isAuto: t.kind === 'asr',
-            })),
-            selectedLang: track.languageCode,
-          }
+          return null
         },
       })
 
-      const result = results[0]?.result
-      if (!result) {
-        sendResponse({ error: '스크립트 실행 결과가 없어요.', lines: [] })
-      } else {
-        sendResponse(result)
+      let tracks = scriptResult[0]?.result as CaptionTrack[] | null
+
+      // ── Step 2: tracks 없으면 background에서 timedtext list API 호출 ──
+      if (!tracks) {
+        const listRes = await fetch(`https://www.youtube.com/api/timedtext?v=${videoId}&type=list`)
+        if (listRes.ok) {
+          const xml = await listRes.text()
+          const parsed: CaptionTrack[] = []
+          const re = /<track\b([^>]*)>/g
+          let m: RegExpExecArray | null
+          while ((m = re.exec(xml)) !== null) {
+            const attr = (name: string) => m![1].match(new RegExp(`${name}="([^"]*)"`))?.[1] ?? ''
+            const langCode = attr('lang_code')
+            if (!langCode) continue
+            const kind = attr('kind') || undefined
+            const name = attr('name')
+            const langOriginal = attr('lang_original') || langCode
+            const baseUrl =
+              `https://www.youtube.com/api/timedtext?v=${videoId}` +
+              `&lang=${encodeURIComponent(langCode)}` +
+              (kind ? `&kind=${kind}` : '') +
+              (name ? `&name=${encodeURIComponent(name)}` : '')
+            parsed.push({ baseUrl, languageCode: langCode, name: { simpleText: langOriginal }, kind })
+          }
+          if (parsed.length > 0) tracks = parsed
+        }
       }
+
+      if (!tracks || tracks.length === 0) {
+        sendResponse({ error: '이 영상에는 자막이 없어요.', lines: [] })
+        return
+      }
+
+      // ── Step 3: 언어 선택 ──
+      const track =
+        tracks.find((t) => t.languageCode === lang) ??
+        tracks.find((t) => t.languageCode.startsWith(lang.split('-')[0])) ??
+        tracks[0]
+
+      // ── Step 4: background에서 직접 fetch (YouTube 서비스 워커 우회) ──
+      const base =
+        `https://www.youtube.com/api/timedtext?v=${videoId}` +
+        `&lang=${encodeURIComponent(track.languageCode)}`
+      const kindParam = track.kind ? `&kind=${track.kind}` : ''
+
+      const primaryUrl = track.baseUrl.includes('fmt=')
+        ? track.baseUrl
+        : `${track.baseUrl}&fmt=json3`
+
+      const urlsToTry: [string, boolean][] = [
+        // [url, isJson3]
+        [primaryUrl, true],
+        [`${base}${kindParam}&fmt=json3`, true],
+        [`${base}&fmt=json3`, true],
+        [`${base}${kindParam}`, false],   // XML fallback
+        [`${base}`, false],
+      ]
+
+      let lines: { start: number; dur: number; text: string }[] | null = null
+
+      for (const [url, isJson3] of urlsToTry) {
+        try {
+          const res = await fetch(url)
+          if (!res.ok) continue
+          const text = await res.text()
+          if (!text.trim()) continue
+          console.log('[LC BG] ✓', url.replace('https://www.youtube.com/api/timedtext?', '').slice(0, 80))
+          lines = isJson3
+            ? parseJson3((JSON.parse(text) as { events: CaptionSegment[] }).events)
+            : parseXmlCaptions(text)
+          break
+        } catch { continue }
+      }
+
+      if (!lines || lines.length === 0) {
+        sendResponse({ error: '자막을 불러올 수 없어요. 이 영상에는 자막이 없거나 접근이 제한되어 있어요.', lines: [] })
+        return
+      }
+
+      sendResponse({
+        lines,
+        languages: tracks.map((t) => ({
+          code: t.languageCode,
+          name: t.name?.simpleText ?? t.languageCode,
+          isAuto: t.kind === 'asr',
+        })),
+        selectedLang: track.languageCode,
+      })
     } catch (e) {
       sendResponse({ error: String(e), lines: [] })
     }
