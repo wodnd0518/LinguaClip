@@ -104,17 +104,29 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
           if (!track) return { lines: [], languages: [], error: '자막 트랙을 찾을 수 없어요.' }
 
+          // auth 파라미터 제거한 clean URL (fallback용)
+          const cleanUrl =
+            `https://www.youtube.com/api/timedtext?v=${vid}` +
+            `&lang=${encodeURIComponent(track.languageCode)}` +
+            (track.name?.simpleText ? `&name=${encodeURIComponent(track.name.simpleText)}` : '') +
+            `&fmt=json3`
+
           const captionUrl = track.baseUrl.includes('fmt=')
             ? track.baseUrl
             : `${track.baseUrl}&fmt=json3`
 
-          const captionRes = await fetch(captionUrl)
-          if (!captionRes.ok) {
-            return { lines: [], languages: [], error: `자막 fetch 실패 (${captionRes.status})` }
+          async function fetchText(url: string): Promise<string> {
+            const res = await fetch(url)
+            if (!res.ok) return ''
+            return res.text()
           }
 
-          const text = await captionRes.text()
-          if (!text.trim()) return { lines: [], languages: [], error: '자막 응답이 비어있어요.' }
+          let text = await fetchText(captionUrl)
+          // baseUrl이 만료됐거나 빈 응답이면 clean URL로 재시도
+          if (!text.trim() && captionUrl !== cleanUrl) {
+            text = await fetchText(cleanUrl)
+          }
+          if (!text.trim()) return { lines: [], languages: [], error: '자막을 불러올 수 없어요. 영상에 자막이 없거나 제한된 영상일 수 있어요.' }
 
           const data: { events: CaptionSegment[] } = JSON.parse(text)
 
