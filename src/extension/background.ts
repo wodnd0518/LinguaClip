@@ -104,29 +104,37 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
           if (!track) return { lines: [], languages: [], error: '자막 트랙을 찾을 수 없어요.' }
 
-          // auth 파라미터 제거한 clean URL (fallback용)
-          const cleanUrl =
-            `https://www.youtube.com/api/timedtext?v=${vid}` +
-            `&lang=${encodeURIComponent(track.languageCode)}` +
-            (track.name?.simpleText ? `&name=${encodeURIComponent(track.name.simpleText)}` : '') +
-            `&fmt=json3`
+          async function fetchText(url: string): Promise<string> {
+            try {
+              const res = await fetch(url)
+              if (!res.ok) return ''
+              return await res.text()
+            } catch { return '' }
+          }
 
           const captionUrl = track.baseUrl.includes('fmt=')
             ? track.baseUrl
             : `${track.baseUrl}&fmt=json3`
 
-          async function fetchText(url: string): Promise<string> {
-            const res = await fetch(url)
-            if (!res.ok) return ''
-            return res.text()
-          }
+          // fallback URL 목록: auth 파라미터 없는 clean URL 변형들
+          const base = `https://www.youtube.com/api/timedtext?v=${vid}&lang=${encodeURIComponent(track.languageCode)}`
+          const fallbackUrls = [
+            // name 포함
+            ...(track.name?.simpleText
+              ? [`${base}&name=${encodeURIComponent(track.name.simpleText)}&fmt=json3`]
+              : []),
+            // name 없이
+            `${base}&fmt=json3`,
+            // auto-generated 전용 (kind=asr)
+            `${base}&kind=asr&fmt=json3`,
+          ]
 
           let text = await fetchText(captionUrl)
-          // baseUrl이 만료됐거나 빈 응답이면 clean URL로 재시도
-          if (!text.trim() && captionUrl !== cleanUrl) {
-            text = await fetchText(cleanUrl)
+          for (const url of fallbackUrls) {
+            if (text.trim()) break
+            if (url !== captionUrl) text = await fetchText(url)
           }
-          if (!text.trim()) return { lines: [], languages: [], error: '자막을 불러올 수 없어요. 영상에 자막이 없거나 제한된 영상일 수 있어요.' }
+          if (!text.trim()) return { lines: [], languages: [], error: '자막을 불러올 수 없어요. 이 영상에는 자막이 없거나 접근이 제한되어 있어요.' }
 
           const data: { events: CaptionSegment[] } = JSON.parse(text)
 
