@@ -63,6 +63,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
             const ipr = (window as any).ytInitialPlayerResponse
             const raw = ipr?.captions?.playerCaptionsTracklistRenderer?.captionTracks
             if (Array.isArray(raw) && raw.length > 0) tracks = raw as Track[]
+            console.log('[LC] ytInitialPlayerResponse tracks:', tracks?.length ?? 0)
           } catch { /* ignore */ }
 
           // Fallback: timedtext list API — ytInitialPlayerResponse보다 느리지만 안정적
@@ -86,6 +87,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
                     const baseUrl =
                       `https://www.youtube.com/api/timedtext?v=${vid}` +
                       `&lang=${encodeURIComponent(langCode)}` +
+                      (kind ? `&kind=${kind}` : '') +
                       (name ? `&name=${encodeURIComponent(name)}` : '') +
                       `&fmt=json3`
                     return { baseUrl, languageCode: langCode, name: { simpleText: langOriginal }, kind }
@@ -104,17 +106,23 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
           if (!track) return { lines: [], languages: [], error: '자막 트랙을 찾을 수 없어요.' }
 
-          async function fetchText(url: string): Promise<string> {
+          async function fetchText(url: string): Promise<{ text: string; status: number }> {
             try {
               const res = await fetch(url)
-              if (!res.ok) return ''
-              return await res.text()
-            } catch { return '' }
+              const text = res.ok ? await res.text() : ''
+              console.log(`[LC] fetch ${res.status} len=${text.length}`, url.split('?')[1])
+              return { text, status: res.status }
+            } catch (e) {
+              console.log('[LC] fetch error:', e, url.split('?')[1])
+              return { text: '', status: 0 }
+            }
           }
 
           const captionUrl = track.baseUrl.includes('fmt=')
             ? track.baseUrl
             : `${track.baseUrl}&fmt=json3`
+
+          console.log('[LC] selected track:', track.languageCode, track.kind, 'captionUrl:', captionUrl.split('?')[1])
 
           // fallback URL 목록: auth 파라미터 없는 clean URL 변형들
           const base = `https://www.youtube.com/api/timedtext?v=${vid}&lang=${encodeURIComponent(track.languageCode)}`
@@ -129,10 +137,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
             `${base}&kind=asr&fmt=json3`,
           ]
 
-          let text = await fetchText(captionUrl)
+          let text = (await fetchText(captionUrl)).text
           for (const url of fallbackUrls) {
             if (text.trim()) break
-            if (url !== captionUrl) text = await fetchText(url)
+            if (url !== captionUrl) text = (await fetchText(url)).text
           }
           if (!text.trim()) return { lines: [], languages: [], error: '자막을 불러올 수 없어요. 이 영상에는 자막이 없거나 접근이 제한되어 있어요.' }
 
