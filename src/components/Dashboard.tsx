@@ -4,7 +4,7 @@ import { IS_EXT } from '../lib/env'
 import { useYouTubeTab } from '../hooks/useYouTubeTab'
 import YouTubePlayer, { type YouTubePlayerHandle } from './YouTubePlayer'
 import YouTubeStatus from './YouTubeStatus'
-import CapturePanel from './CapturePanel'
+import TranscriptPanel from './TranscriptPanel'
 import SavedClips from './SavedClips'
 import { useClips, type Clip } from '../hooks/useClips'
 
@@ -28,7 +28,7 @@ export default function Dashboard() {
   const { user, signOutUser } = useAuth()
 
   // 확장 프로그램: YouTube 탭 연동
-  const { videoInfo, isOnYouTube, seekTo: ytSeekTo, navigateTab, captureSubtitle, resumeVideo, startShadow, stopShadow } = useYouTubeTab()
+  const { videoInfo, isOnYouTube, seekTo: ytSeekTo, navigateTab, startShadow, stopShadow } = useYouTubeTab()
 
   // 웹 전용: URL 입력 + IFrame 플레이어
   const [urlInput, setUrlInput] = useState('')
@@ -37,6 +37,17 @@ export default function Dashboard() {
   const playerRef = useRef<YouTubePlayerHandle>(null)
 
   const { clips, loading: clipsLoading, saveClip, deleteClip } = useClips(user!.uid)
+
+  // 웹 모드 currentTime 폴링 (0.5초 간격)
+  const [webCurrentTime, setWebCurrentTime] = useState(0)
+  useEffect(() => {
+    if (IS_EXT || !videoId) return
+    const id = setInterval(() => {
+      const t = playerRef.current?.getCurrentTime() ?? 0
+      setWebCurrentTime(t)
+    }, 500)
+    return () => clearInterval(id)
+  }, [videoId])
 
   // 쉐도잉 상태
   const [shadowingClip, setShadowingClip] = useState<Clip | null>(null)
@@ -231,13 +242,13 @@ export default function Dashboard() {
             )}
           </div>
 
-          {/* 오른쪽: 자막 캡처 + 사전 */}
+          {/* 오른쪽: 전체 스크립트 뷰어 */}
           <div className="lg:flex-1">
-            <CapturePanel
-              canSave={canSave}
+            <TranscriptPanel
+              videoId={IS_EXT ? (videoInfo?.videoId ?? null) : videoId}
+              currentTime={IS_EXT ? (videoInfo?.currentTime ?? 0) : webCurrentTime}
+              onSeek={IS_EXT ? ytSeekTo : (t) => playerRef.current?.seekTo(t)}
               onSave={canSave ? handleSave : undefined}
-              onCapture={IS_EXT ? captureSubtitle : undefined}
-              onResume={IS_EXT ? resumeVideo : undefined}
             />
           </div>
 
