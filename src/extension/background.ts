@@ -5,20 +5,13 @@ chrome.action.onClicked.addListener((tab) => {
   }
 })
 
-interface CaptionTrack {
-  baseUrl: string
-  languageCode: string
-  name?: { simpleText?: string }
-  kind?: string
-}
+type TranscriptLine = { start: number; dur: number; text: string }
 
 interface CaptionSegment {
   tStartMs: number
   dDurationMs?: number
   segs?: { utf8: string }[]
 }
-
-type TranscriptLine = { start: number; dur: number; text: string }
 
 function parseJson3(events: CaptionSegment[]): TranscriptLine[] {
   return (events ?? [])
@@ -31,7 +24,6 @@ function parseJson3(events: CaptionSegment[]): TranscriptLine[] {
     .filter((l) => l.text)
 }
 
-// Service worker에 DOMParser 없음 → regex
 function parseXmlCaptions(xml: string): TranscriptLine[] {
   const lines: TranscriptLine[] = []
   const re = /<text[^>]+start="([\d.]+)"[^>]*dur="([\d.]+)"[^>]*>([\s\S]*?)<\/text>/g
@@ -46,120 +38,50 @@ function parseXmlCaptions(xml: string): TranscriptLine[] {
   return lines
 }
 
-// ── 재귀 탐색 헬퍼 ──────────────────────────────────────────
-function findKey<T>(obj: unknown, key: string): T | null {
-  if (!obj || typeof obj !== 'object') return null
-  const o = obj as Record<string, unknown>
-  if (key in o) return o[key] as T
-  for (const v of Object.values(o)) {
-    const found = findKey<T>(Array.isArray(v) ? { _: v } : v, key)
-    if (found !== null) return found
-    if (Array.isArray(v)) {
-      for (const item of v) {
-        const f = findKey<T>(item, key)
-        if (f !== null) return f
+// ── get_transcript 응답 파싱 ───────────────────────────────
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function parseGetTranscriptData(data: any): TranscriptLine[] {
+  const lines: TranscriptLine[] = []
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function walk(obj: any): string | null {
+    if (!obj || typeof obj !== 'object') return null
+    if ('cueGroups' in obj) return 'found'
+    for (const v of Object.values(obj)) {
+      if (Array.isArray(v)) { for (const i of v) { if (walk(i)) return 'found' } }
+      else if (walk(v)) return 'found'
+    }
+    return null
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function extractCues(obj: any) {
+    if (!obj || typeof obj !== 'object') return
+    if ('cueGroups' in obj && Array.isArray(obj.cueGroups)) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      for (const group of obj.cueGroups) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const cues: any[] = group?.transcriptCueGroupRenderer?.cues ?? []
+        for (const cue of cues) {
+          const r = cue?.transcriptCueRenderer
+          if (!r) continue
+          const text = (
+            r.cue?.simpleText ??
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            r.cue?.runs?.map((x: any) => x.text).join('') ?? ''
+          ).replace(/\n/g, ' ').trim()
+          const start = parseInt(r.startOffsetMs, 10)
+          const dur = parseInt(r.durationMs, 10)
+          if (text && !isNaN(start)) lines.push({ start: start / 1000, dur: isNaN(dur) ? 3 : dur / 1000, text })
+        }
       }
+      return
+    }
+    for (const v of Object.values(obj)) {
+      if (Array.isArray(v)) { for (const i of v) extractCues(i) }
+      else extractCues(v)
     }
   }
-  return null
-}
-
-// ── Approach 1: ANDROID InnerTube 클라이언트 ────────────────
-// POT(Proof of Origin Token) 불필요 — WEB 클라이언트만 POT 요구
-async function getTracksViaAndroid(videoId: string): Promise<CaptionTrack[] | null> {
-  try {
-    const res = await fetch('https://www.youtube.com/youtubei/v1/player', {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        videoId,
-        context: {
-          client: { clientName: 'ANDROID', clientVersion: '20.10.38', androidSdkVersion: 30 },
-        },
-      }),
-    })
-    if (!res.ok) { console.log('[LC] ANDROID player', res.status); return null }
-    const data = await res.json()
-    const raw = data?.captions?.playerCaptionsTracklistRenderer?.captionTracks
-    if (!Array.isArray(raw) || raw.length === 0) { console.log('[LC] ANDROID: no tracks'); return null }
-    console.log('[LC] ANDROID: tracks', raw.length, raw.map((t: CaptionTrack) => `${t.languageCode}/${t.kind}`))
-    return raw as CaptionTrack[]
-  } catch (e) { console.log('[LC] ANDROID error:', e); return null }
-}
-
-// ── Approach 2: get_transcript InnerTube API ─────────────────
-// timedtext API 완전 우회 — 직접 transcript JSON 반환
-async function getTranscriptViaInnerTube(videoId: string, lang: string): Promise<TranscriptLine[] | null> {
-  try {
-    const CLIENT = { clientName: 'WEB', clientVersion: '2.20250101.00.00', hl: lang, gl: 'US' }
-    const headers = {
-      'content-type': 'application/json',
-      'x-youtube-client-name': '1',
-      'x-youtube-client-version': CLIENT.clientVersion,
-    }
-
-    // Step 1: /next 에서 getTranscriptEndpoint.params 추출
-    const nextRes = await fetch('https://www.youtube.com/youtubei/v1/next', {
-      method: 'POST', credentials: 'include', headers,
-      body: JSON.stringify({ videoId, context: { client: CLIENT } }),
-    })
-    if (!nextRes.ok) { console.log('[LC] /next', nextRes.status); return null }
-    const nextData = await nextRes.json()
-
-    const params = findKey<string>(nextData, 'getTranscriptEndpoint') as unknown
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const paramsStr = (params as any)?.params as string | undefined
-    if (!paramsStr) { console.log('[LC] get_transcript: params not found'); return null }
-
-    // Step 2: /get_transcript
-    const tRes = await fetch('https://www.youtube.com/youtubei/v1/get_transcript', {
-      method: 'POST', credentials: 'include', headers,
-      body: JSON.stringify({ context: { client: { clientName: 'WEB', clientVersion: CLIENT.clientVersion } }, params: paramsStr }),
-    })
-    if (!tRes.ok) { console.log('[LC] get_transcript', tRes.status); return null }
-    const tData = await tRes.json()
-
-    // cueGroups 파싱
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const cueGroups = findKey<any[]>(tData, 'cueGroups')
-    if (!Array.isArray(cueGroups) || cueGroups.length === 0) { console.log('[LC] get_transcript: no cueGroups'); return null }
-
-    const lines: TranscriptLine[] = []
-    for (const group of cueGroups) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const cues: any[] = group?.transcriptCueGroupRenderer?.cues ?? []
-      for (const cue of cues) {
-        const r = cue?.transcriptCueRenderer
-        if (!r) continue
-        const text = (r.cue?.simpleText ?? r.cue?.runs?.map((x: { text: string }) => x.text).join('') ?? '').replace(/\n/g, ' ').trim()
-        const start = parseInt(r.startOffsetMs, 10)
-        const dur = parseInt(r.durationMs, 10)
-        if (text && !isNaN(start) && !isNaN(dur)) lines.push({ start: start / 1000, dur: dur / 1000, text })
-      }
-    }
-    console.log('[LC] get_transcript: lines', lines.length)
-    return lines.length > 0 ? lines : null
-  } catch (e) { console.log('[LC] get_transcript error:', e); return null }
-}
-
-// ── 언어 선택 ──────────────────────────────────────────────
-function selectTrack(tracks: CaptionTrack[], lang: string): CaptionTrack {
-  return (
-    tracks.find((t) => t.languageCode === lang) ??
-    tracks.find((t) => t.languageCode.startsWith(lang.split('-')[0])) ??
-    tracks[0]
-  )
-}
-
-// ── caption URL → text ────────────────────────────────────
-async function fetchCaptionText(url: string): Promise<string> {
-  try {
-    const res = await fetch(url, { credentials: 'include' })
-    const text = res.ok ? await res.text() : ''
-    console.log(`[LC] caption fetch ${res.status} len=${text.length}`, url.replace(/^https:\/\/[^?]+\?/, '').slice(0, 60))
-    return text
-  } catch (e) { console.log('[LC] caption fetch error:', e); return '' }
+  if (walk(data)) extractCues(data)
+  return lines
 }
 
 // ── 메인 메시지 핸들러 ────────────────────────────────────
@@ -176,32 +98,165 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     const diag: string[] = []
 
     try {
-      // ── Approach 1: ANDROID InnerTube → captionUrl fetch ──────
+      // ── Step 1: 페이지에서 InnerTube 인증 정보 + transcript params 추출 ──
+      const pageInfo = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        world: 'MAIN',
+        args: [lang],
+        func: (langCode: string) => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const ytCfg = (window as any).yt?.config_ ?? {}
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const ipr = (window as any).ytInitialPlayerResponse
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const ytData = (window as any).ytInitialData
+
+          // captionTracks (URL + kind 정보)
+          const rawTracks = ipr?.captions?.playerCaptionsTracklistRenderer?.captionTracks ?? []
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const tracks = rawTracks.map((t: any) => ({
+            baseUrl: t.baseUrl as string,
+            languageCode: t.languageCode as string,
+            name: t.name,
+            kind: t.kind,
+          }))
+
+          // ytInitialData에서 getTranscriptEndpoint.params 재귀 탐색
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          function findTranscriptParams(obj: any): string | null {
+            if (!obj || typeof obj !== 'object') return null
+            if ('getTranscriptEndpoint' in obj) return obj.getTranscriptEndpoint?.params ?? null
+            for (const v of Object.values(obj)) {
+              const f = Array.isArray(v)
+                ? v.reduce((a: string | null, i) => a ?? findTranscriptParams(i), null)
+                : findTranscriptParams(v)
+              if (f) return f
+            }
+            return null
+          }
+
+          const transcriptParams = findTranscriptParams(ytData)
+
+          // 선택된 트랙 baseUrl (fetch 없이 URL만 반환)
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const track: any =
+            tracks.find((t: { languageCode: string }) => t.languageCode === langCode) ??
+            tracks.find((t: { languageCode: string }) => t.languageCode.startsWith(langCode.split('-')[0])) ??
+            tracks[0]
+
+          return {
+            apiKey: ytCfg.INNERTUBE_API_KEY as string ?? '',
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            context: ytCfg.INNERTUBE_CONTEXT as any ?? null,
+            visitorData: ytCfg.VISITOR_DATA as string ?? '',
+            transcriptParams: transcriptParams ?? null,
+            tracks,
+            selectedTrack: track ?? null,
+          }
+        },
+      })
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const pi = pageInfo[0]?.result as any
+      diag.push(`key:${pi?.apiKey ? 'ok' : 'none'}, ctx:${pi?.context ? 'ok' : 'none'}, tp:${pi?.transcriptParams ? 'ok' : 'none'}, tracks:${pi?.tracks?.length ?? 0}`)
+      console.log('[LC] pageInfo:', JSON.stringify({ key: !!pi?.apiKey, ctx: !!pi?.context, tp: !!pi?.transcriptParams, tracks: pi?.tracks?.length }))
+
       let lines: TranscriptLine[] | null = null
-      let allTracks: CaptionTrack[] | null = null
 
-      const androidTracks = await getTracksViaAndroid(videoId)
-      diag.push(`android:${androidTracks?.length ?? 0}트랙`)
+      // ── Approach A: get_transcript with 페이지 실제 API key ──
+      if (!lines && pi?.apiKey && pi?.context && pi?.transcriptParams) {
+        try {
+          const apiKey = pi.apiKey as string
+          const url = `https://www.youtube.com/youtubei/v1/get_transcript?key=${apiKey}&prettyPrint=false`
+          const res = await fetch(url, {
+            method: 'POST',
+            credentials: 'include',
+            headers: {
+              'content-type': 'application/json',
+              'x-youtube-client-name': String(pi.context?.client?.clientName === 'WEB' ? '1' : pi.context?.client?.clientName ?? '1'),
+              'x-youtube-client-version': String(pi.context?.client?.clientVersion ?? ''),
+              ...(pi.visitorData ? { 'x-goog-visitor-id': pi.visitorData } : {}),
+            },
+            body: JSON.stringify({
+              context: pi.context,
+              params: pi.transcriptParams,
+            }),
+          })
+          const text = res.ok ? await res.text() : ''
+          diag.push(`gt_A:${res.status}/${text.length}`)
+          console.log('[LC] get_transcript A:', res.status, text.length)
+          if (text.trim()) {
+            const parsed = parseGetTranscriptData(JSON.parse(text))
+            if (parsed.length > 0) lines = parsed
+          }
+        } catch (e) { diag.push(`gt_A_err:${String(e).slice(0, 20)}`); console.log('[LC] gt_A error:', e) }
+      }
 
-      if (androidTracks && androidTracks.length > 0) {
-        allTracks = androidTracks
-        const track = selectTrack(androidTracks, lang)
+      // ── Approach B: /next → params → get_transcript (api key 사용) ──
+      if (!lines && pi?.apiKey && pi?.context) {
+        try {
+          const apiKey = pi.apiKey as string
+          const headers = {
+            'content-type': 'application/json',
+            'x-youtube-client-name': '1',
+            'x-youtube-client-version': String(pi.context?.client?.clientVersion ?? '2.20250101.00.00'),
+            ...(pi.visitorData ? { 'x-goog-visitor-id': pi.visitorData } : {}),
+          }
+          const nextRes = await fetch(`https://www.youtube.com/youtubei/v1/next?key=${apiKey}&prettyPrint=false`, {
+            method: 'POST', credentials: 'include', headers,
+            body: JSON.stringify({ videoId, context: pi.context }),
+          })
+          const nextText = nextRes.ok ? await nextRes.text() : ''
+          diag.push(`next:${nextRes.status}/${nextText.length}`)
+          if (nextText.trim()) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            function findTp(obj: any): string | null {
+              if (!obj || typeof obj !== 'object') return null
+              if ('getTranscriptEndpoint' in obj) return obj.getTranscriptEndpoint?.params ?? null
+              for (const v of Object.values(obj)) {
+                const f = Array.isArray(v) ? v.reduce((a: string|null, i) => a ?? findTp(i), null) : findTp(v)
+                if (f) return f
+              }
+              return null
+            }
+            const params = findTp(JSON.parse(nextText))
+            diag.push(`tp_B:${params ? 'ok' : 'none'}`)
+            if (params) {
+              const gtRes = await fetch(`https://www.youtube.com/youtubei/v1/get_transcript?key=${apiKey}&prettyPrint=false`, {
+                method: 'POST', credentials: 'include', headers,
+                body: JSON.stringify({ context: pi.context, params }),
+              })
+              const gtText = gtRes.ok ? await gtRes.text() : ''
+              diag.push(`gt_B:${gtRes.status}/${gtText.length}`)
+              if (gtText.trim()) {
+                const parsed = parseGetTranscriptData(JSON.parse(gtText))
+                if (parsed.length > 0) lines = parsed
+              }
+            }
+          }
+        } catch (e) { diag.push(`gt_B_err:${String(e).slice(0, 20)}`); console.log('[LC] gt_B error:', e) }
+      }
+
+      // ── Approach C: caption URL fetch (timedtext) ──────────────
+      if (!lines && pi?.selectedTrack) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const track: any = pi.selectedTrack
         const base = `https://www.youtube.com/api/timedtext?v=${videoId}&lang=${encodeURIComponent(track.languageCode)}`
-        const kindParam = track.kind ? `&kind=${track.kind}` : ''
-        const primaryUrl = track.baseUrl.includes('fmt=') ? track.baseUrl : `${track.baseUrl}&fmt=json3`
+        const kp = track.kind ? `&kind=${track.kind}` : ''
+        const primary = track.baseUrl?.includes('fmt=') ? track.baseUrl : `${track.baseUrl}&fmt=json3`
 
-        const urlsToTry: [string, boolean][] = [
-          [primaryUrl, true],
-          [`${base}${kindParam}&fmt=json3`, true],
+        const urls: [string, boolean][] = [
+          [primary, true],
+          [`${base}${kp}&fmt=json3`, true],
           [`${base}&fmt=json3`, true],
-          [`${base}${kindParam}`, false],
+          [`${base}${kp}`, false],
         ]
-
-        for (const [url, isJson3] of urlsToTry) {
-          const text = await fetchCaptionText(url)
-          diag.push(`${isJson3 ? 'j3' : 'xml'}:${text.length}`)
-          if (!text.trim()) continue
+        for (const [url, isJson3] of urls) {
           try {
+            const res = await fetch(url, { credentials: 'include' })
+            const text = res.ok ? await res.text() : ''
+            diag.push(`tt:${res.status}/${text.length}`)
+            if (!text.trim()) continue
             const parsed = isJson3
               ? parseJson3((JSON.parse(text) as { events: CaptionSegment[] }).events)
               : parseXmlCaptions(text)
@@ -210,68 +265,26 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         }
       }
 
-      // ── Approach 2: get_transcript InnerTube API ───────────────
       if (!lines || lines.length === 0) {
-        diag.push('→get_transcript')
-        const gtLines = await getTranscriptViaInnerTube(videoId, lang)
-        diag.push(`gt:${gtLines?.length ?? 0}`)
-        if (gtLines && gtLines.length > 0) lines = gtLines
-      }
-
-      // ── Approach 3: ytInitialPlayerResponse (page 직접 접근) ──
-      if (!lines || lines.length === 0) {
-        diag.push('→ipr')
-        try {
-          const scriptResult = await chrome.scripting.executeScript({
-            target: { tabId: tab.id },
-            world: 'MAIN',
-            args: [videoId, lang],
-            func: async (vid: string, lc: string) => {
-              try {
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                const ipr = (window as any).ytInitialPlayerResponse
-                const raw = ipr?.captions?.playerCaptionsTracklistRenderer?.captionTracks
-                if (!Array.isArray(raw) || raw.length === 0) return { lines: null, error: 'no tracks' }
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                const track: any =
-                  raw.find((t: { languageCode: string }) => t.languageCode === lc) ??
-                  raw.find((t: { languageCode: string }) => t.languageCode.startsWith(lc.split('-')[0])) ??
-                  raw[0]
-                const url = track.baseUrl.includes('fmt=') ? track.baseUrl : `${track.baseUrl}&fmt=json3`
-                const res = await fetch(url)
-                const text = await res.text()
-                return { lines: null, rawText: text, langCode: track.languageCode, kind: track.kind, videoIdMatch: ipr?.videoDetails?.videoId === vid }
-              } catch (e) { return { lines: null, error: String(e) } }
-            },
-          })
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const r = scriptResult[0]?.result as any
-          diag.push(`ipr_raw:${r?.rawText?.length ?? 0}`)
-          if (r?.rawText?.trim()) {
-            try {
-              lines = parseJson3((JSON.parse(r.rawText) as { events: CaptionSegment[] }).events)
-            } catch {
-              lines = parseXmlCaptions(r.rawText)
-            }
-          }
-        } catch (e) { diag.push(`ipr_err:${String(e).slice(0, 20)}`) }
-      }
-
-      if (!lines || lines.length === 0) {
+        console.log('[LC] all failed:', diag.join(', '))
         sendResponse({ error: `자막을 불러올 수 없어요. [${diag.join(', ')}]`, lines: [] })
         return
       }
 
-      // ── 언어 목록 (ANDROID tracks or fallback) ────────────────
-      const languages = (allTracks ?? []).map((t) => ({
+      // ── 언어 목록 ─────────────────────────────────────────────
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const allTracks: any[] = pi?.tracks ?? []
+      const languages = allTracks.map((t) => ({
         code: t.languageCode,
         name: t.name?.simpleText ?? t.languageCode,
         isAuto: t.kind === 'asr',
       }))
-      const selectedLang = allTracks ? selectTrack(allTracks, lang).languageCode : lang
+      const selectedLang = pi?.selectedTrack?.languageCode ?? lang
 
-      sendResponse({ lines, languages, selectedLang })
+      console.log('[LC] success:', lines.length, 'lines', diag.join(', '))
+      sendResponse({ lines, languages: languages.length > 0 ? languages : [{ code: lang, name: lang, isAuto: false }], selectedLang })
     } catch (e) {
+      console.log('[LC] fatal error:', e, diag.join(', '))
       sendResponse({ error: `오류: ${String(e)} [${diag.join(', ')}]`, lines: [] })
     }
   })
