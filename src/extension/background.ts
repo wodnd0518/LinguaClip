@@ -106,48 +106,69 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
           if (!track) return { lines: [], languages: [], error: '자막 트랙을 찾을 수 없어요.' }
 
-          async function fetchText(url: string): Promise<{ text: string; status: number }> {
+          async function fetchRaw(url: string): Promise<string> {
             try {
               const res = await fetch(url)
               const text = res.ok ? await res.text() : ''
               console.log(`[LC] fetch ${res.status} len=${text.length}`, url.split('?')[1])
-              return { text, status: res.status }
+              return text
             } catch (e) {
               console.log('[LC] fetch error:', e, url.split('?')[1])
-              return { text: '', status: 0 }
+              return ''
             }
+          }
+
+          function parseXml(xml: string): CaptionSegment[] {
+            const doc = new DOMParser().parseFromString(xml, 'text/xml')
+            return Array.from(doc.querySelectorAll('text')).map((el) => ({
+              tStartMs: parseFloat(el.getAttribute('start') ?? '0') * 1000,
+              dDurationMs: parseFloat(el.getAttribute('dur') ?? '0') * 1000,
+              segs: [{ utf8: el.textContent ?? '' }],
+            }))
           }
 
           const captionUrl = track.baseUrl.includes('fmt=')
             ? track.baseUrl
             : `${track.baseUrl}&fmt=json3`
 
-          console.log('[LC] selected track:', track.languageCode, track.kind, 'captionUrl:', captionUrl.split('?')[1])
-
-          // fallback URL 목록: auth 파라미터 없는 clean URL 변형들
           const base = `https://www.youtube.com/api/timedtext?v=${vid}&lang=${encodeURIComponent(track.languageCode)}`
-          const fallbackUrls = [
-            // name 포함
-            ...(track.name?.simpleText
-              ? [`${base}&name=${encodeURIComponent(track.name.simpleText)}&fmt=json3`]
-              : []),
-            // name 없이
+          const kindParam = track.kind ? `&kind=${track.kind}` : ''
+          console.log('[LC] selected track:', track.languageCode, track.kind)
+
+          // fmt=json3 시도 목록
+          const json3Urls = [
+            captionUrl,
+            `${base}${kindParam}&fmt=json3`,
             `${base}&fmt=json3`,
-            // auto-generated 전용 (kind=asr)
-            `${base}&kind=asr&fmt=json3`,
+          ]
+          // fmt 없음 (XML) 시도 목록 — json3가 모두 빈 응답일 때 fallback
+          const xmlUrls = [
+            `${base}${kindParam}`,
+            `${base}`,
           ]
 
-          let text = (await fetchText(captionUrl)).text
-          for (const url of fallbackUrls) {
+          let text = ''
+          let isXml = false
+
+          for (const url of json3Urls) {
+            text = await fetchRaw(url)
             if (text.trim()) break
-            if (url !== captionUrl) text = (await fetchText(url)).text
           }
+          if (!text.trim()) {
+            for (const url of xmlUrls) {
+              text = await fetchRaw(url)
+              if (text.trim()) { isXml = true; break }
+            }
+          }
+
           if (!text.trim()) return { lines: [], languages: [], error: '자막을 불러올 수 없어요. 이 영상에는 자막이 없거나 접근이 제한되어 있어요.' }
 
-          const data: { events: CaptionSegment[] } = JSON.parse(text)
+          const events: CaptionSegment[] = isXml
+            ? parseXml(text)
+            : (JSON.parse(text) as { events: CaptionSegment[] }).events
 
           return {
-            lines: parseJson3(data.events),
+            lines: parseJson3(events),
             languages: tracks.map((t) => ({
               code: t.languageCode,
               name: t.name?.simpleText ?? t.languageCode,
