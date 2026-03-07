@@ -65,15 +65,37 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
             if (Array.isArray(raw) && raw.length > 0) tracks = raw as Track[]
           } catch { /* ignore */ }
 
+          // Fallback: timedtext list API — ytInitialPlayerResponse보다 느리지만 안정적
+          // (HTML 전체 fetch + 정규식보다 신뢰성 높음)
           if (!tracks) {
-            const pageRes = await fetch(`https://www.youtube.com/watch?v=${vid}`, {
-              headers: { 'Accept-Language': 'en-US,en;q=0.9' },
-            })
-            const html = await pageRes.text()
-            const m = html.match(/"captionTracks":(\[.*?\])/)
-            if (!m) return { lines: [], languages: [], error: '이 영상에는 자막이 없어요.' }
-            tracks = JSON.parse(m[1]) as Track[]
+            try {
+              const listRes = await fetch(
+                `https://www.youtube.com/api/timedtext?v=${vid}&type=list`,
+                { headers: { 'Accept-Language': 'en-US,en;q=0.9' } },
+              )
+              if (listRes.ok) {
+                const xml = await listRes.text()
+                const xmlDoc = new DOMParser().parseFromString(xml, 'text/xml')
+                const trackEls = Array.from(xmlDoc.querySelectorAll('track'))
+                if (trackEls.length > 0) {
+                  tracks = trackEls.map((el) => {
+                    const langCode = el.getAttribute('lang_code') ?? ''
+                    const name = el.getAttribute('name') ?? ''
+                    const langOriginal = el.getAttribute('lang_original') ?? langCode
+                    const kind = el.getAttribute('kind') ?? undefined
+                    const baseUrl =
+                      `https://www.youtube.com/api/timedtext?v=${vid}` +
+                      `&lang=${encodeURIComponent(langCode)}` +
+                      (name ? `&name=${encodeURIComponent(name)}` : '') +
+                      `&fmt=json3`
+                    return { baseUrl, languageCode: langCode, name: { simpleText: langOriginal }, kind }
+                  })
+                }
+              }
+            } catch { /* ignore */ }
           }
+
+          if (!tracks) return { lines: [], languages: [], error: '이 영상에는 자막이 없어요.' }
 
           const track =
             tracks.find((t) => t.languageCode === langCode) ??
